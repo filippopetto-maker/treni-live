@@ -17,6 +17,28 @@ Poi apri <http://localhost:8787>.
 Al primo avvio il server scarica l'anagrafica delle stazioni (circa 2.800, una volta al mese).
 Nei primi minuti i treni compaiono man mano, mentre il server legge i tabelloni.
 
+## Sul Mac, sempre pronto
+
+```bash
+zsh deploy/macos/installa.sh
+```
+
+Installa il server come servizio di macOS: parte da solo a ogni accensione/login e riparte se
+si blocca, senza terminali aperti. Crea anche l'app **Treni Live** in `~/Applications`
+(trascinala nel Dock) che apre la mappa nel browser. Log in `~/Library/Logs/treni-live.log`.
+Per toglierlo: `zsh deploy/macos/installa.sh rimuovi`.
+
+Quando nessuno guarda la mappa (o la scheda è nascosta) il server rallenta da solo:
+
+| Modalità  | Quando                     | Ogni treno        | Tabelloni     |
+| --------- | -------------------------- | ----------------- | ------------- |
+| attivo    | mappa aperta               | ~2,5 min          | ~8 min        |
+| risparmio | dopo 3 min senza nessuno   | ogni 10 min       | ogni 30 min   |
+| standby   | dopo 10 min senza nessuno  | ogni 30 min       | ogni 60 min   |
+
+Appena riapri la mappa torna subito alla frequenza normale. I tempi sono in `MODES` in
+`src/util.js`.
+
 ## Come funziona
 
 ```

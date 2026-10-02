@@ -7,7 +7,7 @@
 //     (ritardo, fermate, ultimo rilevamento) e si calcola il tratto che sta
 //     percorrendo: da [lon, lat, ora] a [lon, lat, ora]. Il browser interpola.
 
-import { Limiter, fetchWithTimeout, normName, distKm, pt, sleep, log } from './util.js';
+import { Limiter, fetchWithTimeout, normName, distKm, pt, sleep, log, activity, idleAwareSleep, MODES } from './util.js';
 import { hubStations } from './stations.js';
 
 const BASE = 'http://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno';
@@ -80,7 +80,7 @@ export class ViaggiaTrenoTracker {
         `ViaggiaTreno: giro tabelloni #${this.sweeps} in ${Math.round(this.lastSweepMs / 1000)}s, ` +
           `+${this.trains.size - before} treni (seguiti: ${this.trains.size})`
       );
-      await sleep(Math.max(10_000, this.sweepMs - (Date.now() - t0)));
+      await idleAwareSleep(Math.max(10_000, (MODES[activity.mode].sweep || this.sweepMs) - (Date.now() - t0)));
     }
   }
 
@@ -126,9 +126,12 @@ export class ViaggiaTrenoTracker {
   scheduleRefresh() {
     if (this.limiter.queuedHi > 12) return;
     const now = Date.now();
+    const minAge = MODES[activity.mode].refresh;
     const due = [];
     for (const tr of this.trains.values()) {
-      if (!tr.inflight && tr.nextRefresh <= now) due.push(tr);
+      if (tr.inflight || tr.nextRefresh > now) continue;
+      if (minAge && tr.upd && now - tr.upd < minAge) continue;
+      due.push(tr);
     }
     due.sort((a, b) => a.nextRefresh - b.nextRefresh);
     for (const tr of due.slice(0, 24 - this.limiter.queuedHi)) {

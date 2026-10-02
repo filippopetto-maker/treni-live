@@ -124,3 +124,55 @@ const round6 = (x) => Math.round(x * 1e6) / 1e6;
 
 export const log = (...a) =>
   console.log(new Date().toLocaleTimeString('it-IT'), ...a);
+
+/**
+ * Modalità del server in base a quanto tempo è passato dall'ultima volta che qualcuno
+ * ha guardato la mappa (batteria, rete, cortesia verso ViaggiaTreno):
+ *   attivo     mappa aperta: frequenza normale
+ *   risparmio  dopo 3 minuti: ogni treno al massimo ogni 10 min, tabelloni ogni 30
+ *   standby    dopo 10 minuti: ogni treno al massimo ogni 30 min, tabelloni ogni 60
+ * L'elenco dei treni resta caldo, così la mappa riaperta è subito quasi completa.
+ */
+export const MODES = {
+  attivo: { refresh: 0, sweep: 0 },
+  risparmio: { after: 3 * 60_000, refresh: 10 * 60_000, sweep: 30 * 60_000 },
+  standby: { after: 10 * 60_000, refresh: 30 * 60_000, sweep: 60 * 60_000 },
+};
+
+export const activity = {
+  last: Date.now(),
+  current: 'attivo',
+  touch() {
+    this.last = Date.now();
+    if (this.current !== 'attivo') {
+      log(`Mappa aperta: da ${this.current} torno alla frequenza normale`);
+      this.current = 'attivo';
+    }
+  },
+  get mode() {
+    const away = Date.now() - this.last;
+    const m = away > MODES.standby.after ? 'standby' : away > MODES.risparmio.after ? 'risparmio' : 'attivo';
+    if (m !== this.current) {
+      this.current = m;
+      log(
+        m === 'standby'
+          ? 'Nessuno guarda la mappa da 10 minuti: modalità standby'
+          : 'Nessuno guarda la mappa da 3 minuti: modalità risparmio'
+      );
+    }
+    return m;
+  },
+  get idle() {
+    return this.mode !== 'attivo';
+  },
+};
+
+/** Aspetta `ms`, ma si sveglia prima se la mappa viene riaperta durante il risparmio. */
+export async function idleAwareSleep(ms) {
+  const end = Date.now() + ms;
+  const startedIdle = activity.idle;
+  while (Date.now() < end) {
+    await sleep(Math.min(5000, end - Date.now()));
+    if (startedIdle && !activity.idle) return;
+  }
+}

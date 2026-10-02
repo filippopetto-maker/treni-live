@@ -33,6 +33,8 @@ const $ = (s) => document.querySelector(s);
 // ---------- dati treni ----------
 
 async function pollTrains() {
+  // Scheda nascosta: niente richieste, così il server può andare in risparmio.
+  if (document.hidden) return;
   try {
     const r = await fetch('/api/trains');
     const data = await r.json();
@@ -454,6 +456,13 @@ map.on('load', () => {
 
   pollTrains();
   setInterval(pollTrains, TRAIN_POLL_MS);
+  // Tornando sulla scheda, aggiorna subito invece di aspettare il prossimo giro.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      pollTrains();
+      pollTransit();
+    }
+  });
   setInterval(renderTrains, 1000);
 });
 

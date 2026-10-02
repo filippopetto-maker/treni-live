@@ -13,7 +13,7 @@ import { ItaloTracker } from './src/italo.js';
 import { TransitFeeds } from './src/transit.js';
 import { RailNetwork } from './src/rail.js';
 import { trainRoute } from './src/routes.js';
-import { log } from './src/util.js';
+import { log, activity } from './src/util.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 8787;
@@ -82,6 +82,7 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     if (url.pathname === '/api/trains') {
+      activity.touch();
       return send(req, res, 200, { now: Date.now(), trains: [...vt.visible(), ...italo.visible()] });
     }
     if (url.pathname === '/api/train') {
@@ -103,6 +104,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/status') {
       return send(req, res, 200, {
+        modalita: activity.mode,
         viaggiatreno: vt.stats(),
         italo: italo.stats(),
         binari: rail.stats(),

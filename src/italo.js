@@ -1,6 +1,6 @@
 // Treni Italo via "Italo in viaggio" (stesso schema: scoperta dai tabelloni + aggiornamento per treno).
 
-import { Limiter, fetchWithTimeout, normName, pt, sleep, log } from './util.js';
+import { Limiter, fetchWithTimeout, normName, pt, sleep, log, activity, idleAwareSleep, MODES } from './util.js';
 import { publicTrain } from './viaggiatreno.js';
 
 const BASE = 'https://italoinviaggio.italotreno.com';
@@ -100,7 +100,7 @@ export class ItaloTracker {
     for (;;) {
       const t0 = Date.now();
       await Promise.all(this.codes.map((c) => this.readBoard(c)));
-      await sleep(Math.max(10_000, this.sweepMs - (Date.now() - t0)));
+      await idleAwareSleep(Math.max(10_000, (MODES[activity.mode].sweep || this.sweepMs) - (Date.now() - t0)));
     }
   }
 
@@ -131,9 +131,11 @@ export class ItaloTracker {
   scheduleRefresh() {
     if (this.limiter.queuedHi > 6) return;
     const now = Date.now();
+    const minAge = MODES[activity.mode].refresh;
     for (const tr of this.trains.values()) {
       if (this.limiter.queuedHi > 10) break;
       if (tr.inflight || tr.nextRefresh > now) continue;
+      if (minAge && tr.upd && now - tr.upd < minAge) continue;
       tr.inflight = true;
       this.refresh(tr).finally(() => (tr.inflight = false));
     }
