@@ -31,7 +31,7 @@ const M_LON = 111_320 * Math.cos((42 * Math.PI) / 180); // approssimazione valid
 export class RailNetwork {
   constructor({ dataDir, stations }) {
     this.binFile = path.join(dataDir, 'rail.bin');
-    this.pathsFile = path.join(dataDir, 'paths.json');
+    this.pathsFile = path.join(dataDir, 'paths-v2.json');
     this.st = stations;
     this.ready = false;
     this.state = 'in attesa';
@@ -273,7 +273,8 @@ export class RailNetwork {
     const src = this.nearest(A.lat, A.lon);
     const dst = this.nearest(B.lat, B.lon);
     if (!src.length || !dst.length) return null;
-    const targets = new Set(dst.map(([i]) => i));
+    const targets = new Map(dst); // nodo → distanza dalla stazione di arrivo
+    const SNAP_W = 3; // peso della distanza binario↔stazione rispetto ai metri di binario
     const run = ++this.run;
     const heapF = [];
     const heapN = [];
@@ -315,19 +316,24 @@ export class RailNetwork {
 
     for (const [i, d] of src) {
       this.stamp[i] = run;
-      this.g[i] = d;
+      this.g[i] = d * SNAP_W;
       this.prev[i] = -1;
-      push(d + h(i), i);
+      push(d * SNAP_W + h(i), i);
     }
     let end = -1;
+    let best = Infinity;
     let expanded = 0;
     while (heapF.length) {
+      if (heapF[0] >= best) break; // nessun percorso migliore possibile
       const u = pop();
       if (this.closed[u] === run) continue;
       this.closed[u] = run;
       if (targets.has(u)) {
-        end = u;
-        break;
+        const cost = this.g[u] + targets.get(u) * SNAP_W;
+        if (cost < best) {
+          best = cost;
+          end = u;
+        }
       }
       if (++expanded > MAX_EXPANSIONS) break;
       for (let k = this.off[u]; k < this.off[u + 1]; k++) {

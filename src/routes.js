@@ -40,5 +40,10 @@ export function trainRoute(tr, rail, st) {
     const state = i + 1 < reached ? 'done' : running && i + 1 === reached ? 'current' : 'todo';
     legs.push({ coords, state });
   }
+  for (let i = 1; i < legs.length; i++) {
+    const end = legs[i - 1].coords[legs[i - 1].coords.length - 1];
+    const start = legs[i].coords[0];
+    if (end[0] !== start[0] || end[1] !== start[1]) legs[i - 1].coords = [...legs[i - 1].coords, start];
+  }
   return { legs };
 }
