@@ -35,8 +35,9 @@ function vtDate(d = new Date()) {
 }
 
 export class ViaggiaTrenoTracker {
-  constructor({ stations, rps = 8, refreshMs = 150_000, sweepMs = 8 * 60_000 }) {
+  constructor({ stations, rail = null, rps = 8, refreshMs = 150_000, sweepMs = 8 * 60_000 }) {
     this.st = stations;
+    this.rail = rail;
     this.hubs = hubStations(stations);
     this.limiter = new Limiter({ concurrency: 6, rps });
     this.refreshMs = refreshMs;
@@ -203,7 +204,7 @@ export class ViaggiaTrenoTracker {
     const fk = F[k];
     if (realArr(fk) && !realDep(fk) && k > 0 && coord(fk)) {
       const c = coord(fk);
-      return { status: 'station', from: pt(c, now), to: pt(c, now), prev: fk.stazione, next: F[k + 1].stazione };
+      return { status: 'station', from: pt(c, now), to: pt(c, now), a: fk.id, prev: fk.stazione, next: F[k + 1].stazione };
     }
 
     let i = k;
@@ -216,6 +217,7 @@ export class ViaggiaTrenoTracker {
     const sched = F[j].arrivo_teorico ?? F[j].programmata;
     if (!sched) return null;
     let from = pt(coord(F[i]), t0);
+    let fromCode = F[i].id;
     let t1 = sched + delayMs;
 
     // Se l'ultimo rilevamento è una località nota tra le due fermate, si riparte da lì:
@@ -227,10 +229,19 @@ export class ViaggiaTrenoTracker {
       const total = distKm(A, B);
       if (distKm(det, B) < total && distKm(A, det) < total * 1.15) {
         from = pt(det, a.oraUltimoRilevamento);
+        fromCode = det.code;
       }
     }
     if (t1 <= from[2]) t1 = from[2] + 60_000;
-    return { status: 'running', from, to: pt(coord(F[j]), t1), prev: F[i].stazione, next: F[j].stazione };
+    return {
+      status: 'running',
+      from,
+      to: pt(coord(F[j]), t1),
+      a: fromCode,
+      b: F[j].id,
+      prev: F[i].stazione,
+      next: F[j].stazione,
+    };
   }
 
   cleanup() {
@@ -255,7 +266,7 @@ export class ViaggiaTrenoTracker {
   visible() {
     const out = [];
     for (const tr of this.trains.values()) {
-      if (tr.seg && (tr.seg.status === 'running' || tr.seg.status === 'station')) out.push(publicTrain(tr));
+      if (tr.seg && (tr.seg.status === 'running' || tr.seg.status === 'station')) out.push(publicTrain(tr, this.rail));
     }
     return out;
   }
@@ -288,6 +299,7 @@ export class ViaggiaTrenoTracker {
 function compactStops(a) {
   return (a.fermate || []).map((f) => ({
     name: f.stazione,
+    code: f.id,
     arr: f.arrivo_teorico,
     dep: f.partenza_teorica,
     realArr: f.arrivoReale,
@@ -297,7 +309,8 @@ function compactStops(a) {
   }));
 }
 
-export function publicTrain(tr) {
+export function publicTrain(tr, rail) {
+  const s = tr.seg;
   return {
     id: tr.id,
     src: tr.src,
@@ -307,11 +320,13 @@ export function publicTrain(tr) {
     delay: tr.delay ?? 0,
     orig: tr.orig,
     dest: tr.dest,
-    status: tr.seg.status,
-    from: tr.seg.from,
-    to: tr.seg.to,
-    prev: tr.seg.prev,
-    next: tr.seg.next,
+    status: s.status,
+    from: s.from,
+    to: s.to,
+    // Id del percorso sui binari (null finché non è calcolato: il browser usa la linea retta).
+    path: s.status === 'running' && rail ? rail.pathFor(s.a, s.b) : null,
+    prev: s.prev,
+    next: s.next,
     det: tr.det,
     detT: tr.detT,
     note: tr.note || undefined,

@@ -22,6 +22,8 @@ const ALIAS = {
   'LAMEZIA TERME': 'LAMEZIA TERME CENTRALE',
   'VALLO D LUCANIA': 'VALLO DELLA LUCANIA CASTELNUOVO',
   'VILLA S GIOVANNI': 'VILLA S GIOVANNI',
+  'TORINO PORTA DI SUSA': 'TORINO PORTA SUSA',
+  'S DONA JESOLO': 'S DONA DI PIAVE JESOLO',
   TRIESTE: 'TRIESTE CENTRALE',
 };
 
@@ -38,8 +40,9 @@ function parseHM(hm, now) {
 }
 
 export class ItaloTracker {
-  constructor({ stations, rps = 3, refreshMs = 90_000, sweepMs = 4 * 60_000 }) {
+  constructor({ stations, rail = null, rps = 3, refreshMs = 90_000, sweepMs = 4 * 60_000 }) {
     this.st = stations;
+    this.rail = rail;
     this.limiter = new Limiter({ concurrency: 3, rps });
     this.refreshMs = refreshMs;
     this.sweepMs = sweepMs;
@@ -75,7 +78,8 @@ export class ItaloTracker {
 
   resolve(name) {
     if (this.resolveCache.has(name)) return this.resolveCache.get(name);
-    const n = normName(name);
+    // Abbreviazioni Italo: "Trieste C.le", "Lamezia Terme C" → "… CENTRALE".
+    const n = normName(name).replace(/ C LE$/, ' CENTRALE').replace(/ C$/, ' CENTRALE');
     const byName = this.st.byName;
     let s = byName.get(ALIAS[n] || n) || byName.get(n + ' CENTRALE');
     if (!s) {
@@ -163,6 +167,7 @@ export class ItaloTracker {
       seg,
       stops: all.map((s, idx) => ({
         name: s.LocationDescription,
+        code: this.resolve(s.LocationDescription)?.code,
         arr: idx === 0 ? null : parseHM(s.EstimatedArrivalTime, now),
         dep: idx === all.length - 1 ? null : parseHM(s.EstimatedDepartureTime, now),
         realArr: idx === 0 ? null : parseHM(s.ActualArrivalTime, now),
@@ -196,16 +201,24 @@ export class ItaloTracker {
     const B = this.resolve(next.LocationDescription);
     if (!A || !B || !depT || !arrT) return null;
     if (depT > now) {
-      return { status: 'station', from: pt(A, now), to: pt(A, now), prev: last.LocationDescription, next: next.LocationDescription };
+      return { status: 'station', from: pt(A, now), to: pt(A, now), a: A.code, prev: last.LocationDescription, next: next.LocationDescription };
     }
     if (arrT <= depT) arrT = depT + 60_000;
-    return { status: 'running', from: pt(A, depT), to: pt(B, arrT), prev: last.LocationDescription, next: next.LocationDescription };
+    return {
+      status: 'running',
+      from: pt(A, depT),
+      to: pt(B, arrT),
+      a: A.code,
+      b: B.code,
+      prev: last.LocationDescription,
+      next: next.LocationDescription,
+    };
   }
 
   visible() {
     const out = [];
     for (const tr of this.trains.values()) {
-      if (tr.seg && (tr.seg.status === 'running' || tr.seg.status === 'station')) out.push(publicTrain(tr));
+      if (tr.seg && (tr.seg.status === 'running' || tr.seg.status === 'station')) out.push(publicTrain(tr, this.rail));
     }
     return out;
   }

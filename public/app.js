@@ -5,7 +5,7 @@
 const TRAIN_POLL_MS = 15_000;
 const TRANSIT_POLL_MS = 20_000;
 const TRANSIT_MIN_ZOOM = 11;
-const COLORS = { av: '#d6202a', italo: '#8a1538', ic: '#1f5fbf', reg: '#2e9e5b' };
+const COLORS = { av: '#d6202a', italo: '#8a1538', ic: '#1f5fbf', reg: '#2e9e5b', bus: '#e08a00' };
 
 const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 const map = new maplibregl.Map({
@@ -38,6 +38,7 @@ async function pollTrains() {
     const data = await r.json();
     clockOffset = data.now - Date.now();
     trains = data.trains;
+    await loadPaths();
     updateCounts();
     renderTrains();
     refreshStatus();
@@ -52,7 +53,122 @@ function position(t, now) {
   if (t1 <= t0) return [x1, y1];
   // Si ferma poco prima della prossima fermata se il treno è in ritardo sulla stima.
   const f = Math.max(0, Math.min(0.98, (now - t0) / (t1 - t0)));
+  const p = t.path && pathCache.get(t.path);
+  if (p && p.pts) return alongPath(p, f);
   return [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f];
+}
+
+// ---------- percorsi sui binari ----------
+// Il server manda per ogni treno l'id del percorso tra le due località (es. "S01700>S01820");
+// le geometrie si scaricano una volta e restano in memoria.
+
+const pathCache = new Map(); // id → { pts, cum, total } | 'pending'
+const M_LON = 111320 * Math.cos((42 * Math.PI) / 180);
+const M_LAT = 110540;
+
+function preparePath(pts) {
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) {
+    const dx = (pts[i][0] - pts[i - 1][0]) * M_LON;
+    const dy = (pts[i][1] - pts[i - 1][1]) * M_LAT;
+    cum.push(cum[i - 1] + Math.hypot(dx, dy));
+  }
+  return { pts, cum, total: cum[cum.length - 1] };
+}
+
+function alongPath(p, f) {
+  const d = f * p.total;
+  let lo = 0;
+  let hi = p.cum.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (p.cum[mid] <= d) lo = mid;
+    else hi = mid;
+  }
+  const seg = p.cum[hi] - p.cum[lo] || 1;
+  const k = (d - p.cum[lo]) / seg;
+  const [ax, ay] = p.pts[lo];
+  const [bx, by] = p.pts[hi];
+  return [ax + (bx - ax) * k, ay + (by - ay) * k];
+}
+
+async function loadPaths() {
+  const need = [...new Set(trains.map((t) => t.path).filter((id) => id && !pathCache.has(id)))];
+  for (let i = 0; i < need.length; i += 200) {
+    const batch = need.slice(i, i + 200);
+    batch.forEach((id) => pathCache.set(id, 'pending'));
+    try {
+      const data = await (await fetch('/api/paths?ids=' + batch.map(encodeURIComponent).join(','))).json();
+      for (const id of batch) data[id] ? pathCache.set(id, preparePath(data[id])) : pathCache.delete(id);
+    } catch {
+      batch.forEach((id) => pathCache.delete(id));
+    }
+  }
+}
+
+// ---------- percorso del mezzo selezionato ----------
+// Treni: tratte dalla prima all'ultima fermata. Bus/tram: forma della corsa dal GTFS statico.
+// La parte già percorsa è sfumata, quella da fare è a colore pieno; il punto di divisione
+// è la posizione attuale del mezzo e si aggiorna mentre si muove.
+
+let selected = null; // { kind: 'train'|'vehicle', id, color, legs?, coords?, pos? }
+
+/** Punto della polilinea più vicino a p: indice del segmento e punto proiettato. */
+function project(pts, p) {
+  let best = { i: 0, q: pts[0], d: Infinity };
+  for (let i = 0; i < pts.length - 1; i++) {
+    const ax = pts[i][0] * M_LON, ay = pts[i][1] * M_LAT;
+    const bx = pts[i + 1][0] * M_LON, by = pts[i + 1][1] * M_LAT;
+    const px = p[0] * M_LON, py = p[1] * M_LAT;
+    const dx = bx - ax, dy = by - ay;
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy || 1)));
+    const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+    if (d < best.d) {
+      best = { i, d, q: [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t] };
+    }
+  }
+  return best;
+}
+
+function splitAt(pts, p) {
+  const { i, q } = project(pts, p);
+  return [[...pts.slice(0, i + 1), q], [q, ...pts.slice(i + 1)]];
+}
+
+function drawSelected() {
+  const doneSrc = map.getSource('route-done');
+  const todoSrc = map.getSource('route-todo');
+  if (!doneSrc) return;
+  const done = [];
+  const todo = [];
+  if (selected?.kind === 'train' && selected.legs) {
+    const t = trains.find((x) => x.id === selected.id);
+    const pos = t && position(t, Date.now() + clockOffset);
+    for (const leg of selected.legs) {
+      if (leg.state === 'done') done.push(leg.coords);
+      else if (leg.state === 'current' && pos) {
+        const [a, b] = splitAt(leg.coords, pos);
+        done.push(a);
+        todo.push(b);
+      } else todo.push(leg.coords);
+    }
+  } else if (selected?.kind === 'vehicle' && selected.coords) {
+    const [a, b] = splitAt(selected.coords, selected.pos);
+    done.push(a);
+    todo.push(b);
+  }
+  const fc = (parts) => ({
+    type: 'Feature',
+    geometry: { type: 'MultiLineString', coordinates: parts },
+    properties: { color: selected?.color || '#888' },
+  });
+  doneSrc.setData(fc(done));
+  todoSrc.setData(fc(todo));
+}
+
+function clearSelected() {
+  selected = null;
+  drawSelected();
 }
 
 function trainFeatures() {
@@ -73,6 +189,7 @@ function renderTrains() {
   const src = map.getSource('trains');
   if (!src) return;
   src.setData(trainFeatures());
+  if (selected?.kind === 'train') drawSelected();
   if (followId) {
     const t = trains.find((x) => x.id === followId);
     if (t && openPopup) openPopup.setLngLat(position(t, Date.now() + clockOffset));
@@ -123,6 +240,14 @@ async function pollTransit() {
       })),
     });
     $('#transitCount').textContent = data.vehicles.length.toLocaleString('it-IT');
+    if (selected?.kind === 'vehicle') {
+      const v = data.vehicles.find((x) => x.id === selected.id && x.feed === selected.feed);
+      if (v) {
+        selected.pos = [v.lon, v.lat];
+        if (openPopup) openPopup.setLngLat(selected.pos);
+        drawSelected();
+      }
+    }
     const errors = data.feeds.filter((f) => f.error);
     $('#hint').textContent = !data.feeds.length
       ? 'Nessun feed bus/tram in tempo reale configurato per questa zona (vedi feeds.json).'
@@ -141,8 +266,8 @@ const delayClass = (d) => (d > 15 ? 'bad' : d >= 5 ? 'warn' : 'ok');
 const delayText = (d) => (d > 0 ? `+${d} min` : d < 0 ? `${d} min (anticipo)` : 'in orario');
 
 async function showTrain(t, lngLat) {
-  followId = t.id;
   openPopup?.remove();
+  followId = t.id;
   const head = `
     <h3><i class="dot ${t.cat}"></i>${esc(t.label)}</h3>
     <div class="route">${esc(t.orig || '')} → ${esc(t.dest || '')}</div>
@@ -158,7 +283,21 @@ async function showTrain(t, lngLat) {
     .setLngLat(lngLat)
     .setHTML(`<div class="pop">${head}<ul class="stops"><li>Carico le fermate…</li></ul></div>`)
     .addTo(map);
-  openPopup.on('close', () => (followId = null));
+  openPopup.on('close', () => {
+    followId = null;
+    clearSelected();
+  });
+  selected = { kind: 'train', id: t.id, color: COLORS[t.cat] };
+  drawSelected();
+  fetch(`/api/train/route?id=${encodeURIComponent(t.id)}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((r) => {
+      if (r && selected?.id === t.id) {
+        selected.legs = r.legs;
+        drawSelected();
+      }
+    })
+    .catch(() => {});
 
   try {
     const d = await (await fetch(`/api/train?id=${encodeURIComponent(t.id)}`)).json();
@@ -186,7 +325,8 @@ function showVehicle(p, lngLat) {
   openPopup = new maplibregl.Popup({ offset: 8 })
     .setLngLat(lngLat)
     .setHTML(
-      `<div class="pop"><h3><i class="dot bus"></i>Linea ${esc(p.route || '?')}</h3>
+      `<div class="pop"><h3><i class="dot bus"></i>Linea ${esc(p.rname || p.route || '?')}</h3>
+       ${p.dest ? `<div class="route">→ ${esc(p.dest)}</div>` : ''}
        <dl>
          <dt>Vettura</dt><dd>${esc(p.vlabel || p.vid || p.id)}</dd>
          ${p.speed ? `<dt>Velocità</dt><dd>${p.speed} km/h</dd>` : ''}
@@ -194,6 +334,19 @@ function showVehicle(p, lngLat) {
        </dl></div>`
     )
     .addTo(map);
+  openPopup.on('close', clearSelected);
+  selected = { kind: 'vehicle', id: p.id, feed: p.feed, color: COLORS.bus, pos: lngLat };
+  drawSelected();
+  const q = new URLSearchParams({ feed: p.feed, trip: p.trip || '', route: p.route || '' });
+  fetch(`/api/vehicle/route?${q}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((r) => {
+      if (r && selected?.id === p.id) {
+        selected.coords = r.coords;
+        drawSelected();
+      }
+    })
+    .catch(() => {});
 }
 
 // ---------- mappa ----------
@@ -209,6 +362,31 @@ map.on('load', () => {
 
   map.addSource('transit', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addSource('trains', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource('route-done', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource('route-todo', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+  // Percorso del mezzo selezionato: già fatto (sfumato) e da fare (pieno, con bordo chiaro).
+  map.addLayer({
+    id: 'route-done',
+    type: 'line',
+    source: 'route-done',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': ['get', 'color'], 'line-width': 4, 'line-opacity': 0.3 },
+  });
+  map.addLayer({
+    id: 'route-todo-casing',
+    type: 'line',
+    source: 'route-todo',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': dark ? '#181b22' : '#ffffff', 'line-width': 7.5, 'line-opacity': 0.9 },
+  });
+  map.addLayer({
+    id: 'route-todo',
+    type: 'line',
+    source: 'route-todo',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': ['get', 'color'], 'line-width': 4.5 },
+  });
 
   map.addLayer({
     id: 'transit',

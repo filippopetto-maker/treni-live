@@ -10,6 +10,8 @@ import { loadStations } from './src/stations.js';
 import { ViaggiaTrenoTracker } from './src/viaggiatreno.js';
 import { ItaloTracker } from './src/italo.js';
 import { TransitFeeds } from './src/transit.js';
+import { RailNetwork } from './src/rail.js';
+import { trainRoute } from './src/routes.js';
 import { log } from './src/util.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -17,14 +19,17 @@ const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || '127.0.0.1';
 
 const stations = await loadStations(path.join(ROOT, 'data'));
+const rail = new RailNetwork({ dataDir: path.join(ROOT, 'data'), stations });
 const vt = new ViaggiaTrenoTracker({
   stations,
+  rail,
   rps: Number(process.env.VT_RPS) || 8,
   refreshMs: (Number(process.env.VT_REFRESH_S) || 150) * 1000,
 });
-const italo = new ItaloTracker({ stations });
-const transit = new TransitFeeds(path.join(ROOT, 'feeds.json'));
+const italo = new ItaloTracker({ stations, rail });
+const transit = new TransitFeeds(path.join(ROOT, 'feeds.json'), path.join(ROOT, 'data'));
 await transit.load();
+rail.start();
 vt.start();
 italo.start();
 
@@ -79,7 +84,26 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (url.pathname === '/api/status') {
-      return send(req, res, 200, { viaggiatreno: vt.stats(), italo: italo.stats(), feeds: transit.list() });
+      return send(req, res, 200, {
+        viaggiatreno: vt.stats(),
+        italo: italo.stats(),
+        binari: rail.stats(),
+        feeds: transit.list(),
+      });
+    }
+    if (url.pathname === '/api/paths') {
+      const ids = (url.searchParams.get('ids') || '').split(',').filter(Boolean).slice(0, 300);
+      return send(req, res, 200, rail.get(ids));
+    }
+    if (url.pathname === '/api/train/route') {
+      const tr = findTrain(url.searchParams.get('id') || '');
+      const r = tr && trainRoute(tr, rail, stations);
+      return r ? send(req, res, 200, r) : send(req, res, 404, { error: 'percorso non disponibile' });
+    }
+    if (url.pathname === '/api/vehicle/route') {
+      const p = url.searchParams;
+      const r = transit.vehicleRoute(p.get('feed'), p.get('trip'), p.get('route'));
+      return r ? send(req, res, 200, r) : send(req, res, 404, { error: 'percorso non disponibile' });
     }
     if (url.pathname === '/api/debug') {
       // Treni seguiti ma non disegnati, con il motivo: utile per migliorare la copertura.
@@ -111,3 +135,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => log(`Mappa pronta su http://localhost:${PORT}`));
+
+// Salva la cache dei percorsi quando il server viene fermato (Ctrl+C).
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, async () => {
+    await rail.savePaths();
+    process.exit(0);
+  });
+}

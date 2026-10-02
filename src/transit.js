@@ -4,6 +4,7 @@
 
 import fs from 'node:fs/promises';
 import { fetchWithTimeout, log } from './util.js';
+import { GtfsStatic } from './gtfs-static.js';
 
 // ---------- decoder protobuf minimale ----------
 
@@ -104,9 +105,11 @@ export function decodeVehiclePositions(buf) {
 // ---------- gestione dei feed ----------
 
 export class TransitFeeds {
-  constructor(file) {
+  constructor(file, dataDir) {
     this.file = file;
+    this.dataDir = dataDir;
     this.feeds = [];
+    this.statics = new Map(); // id feed → GtfsStatic
     this.cache = new Map(); // id → { at, vehicles, error }
     this.inflight = new Map();
   }
@@ -118,10 +121,27 @@ export class TransitFeeds {
     } catch (e) {
       log('Mezzi urbani: feeds.json non leggibile:', e.message);
     }
+    for (const f of this.feeds) {
+      if (!f.static) continue;
+      const g = new GtfsStatic({ dataDir: this.dataDir, feed: f });
+      this.statics.set(f.id, g);
+      g.start(); // in sottofondo
+    }
+  }
+
+  /** Percorso completo della corsa di un veicolo, dal GTFS statico del feed. */
+  vehicleRoute(feedId, tripId, routeId) {
+    return this.statics.get(feedId)?.route(tripId, routeId) || null;
   }
 
   list() {
-    return this.feeds.map(({ id, name, bbox }) => ({ id, name, bbox, error: this.cache.get(id)?.error }));
+    return this.feeds.map(({ id, name, bbox }) => ({
+      id,
+      name,
+      bbox,
+      error: this.cache.get(id)?.error,
+      gtfsStatico: this.statics.get(id)?.state,
+    }));
   }
 
   async vehicles(feed) {
@@ -156,9 +176,11 @@ export class TransitFeeds {
     const results = await Promise.all(hit.map((f) => this.vehicles(f).then((r) => ({ f, r }))));
     const vehicles = [];
     for (const { f, r } of results) {
+      const st = this.statics.get(f.id);
       for (const v of r.vehicles) {
         if (v.lon < x0 || v.lon > x1 || v.lat < y0 || v.lat > y1) continue;
-        vehicles.push({ feed: f.id, ...v });
+        const extra = st?.ready ? st.info(v.trip, v.route) : {};
+        vehicles.push({ feed: f.id, ...v, rname: extra.rname, dest: extra.dest });
         if (vehicles.length >= 5000) break;
       }
     }

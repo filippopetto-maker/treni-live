@@ -3,6 +3,7 @@
     "id": "roma",
     "name": "Roma — ATAC e Roma TPL (Roma Mobilità)",
     "url": "https://romamobilita.it/wp-content/uploads/shared/rome_rtgtfs_vehicle_positions_feed.pb",
+    "static": "https://romamobilita.it/wp-content/uploads/shared/rome_static_gtfs.zip",
     "bbox": [12.2, 41.65, 12.85, 42.1],
     "refreshMs": 20000
   }

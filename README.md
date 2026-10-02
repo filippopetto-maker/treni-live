@@ -40,6 +40,15 @@ La posizione è **stimata** e la linea tra due fermate è dritta, non segue i bi
 Il server li scarica solo quando la mappa è zoomata (livello 11 o più) su un'area coperta.
 In quel caso usa le posizioni GPS reali, aggiornate ogni 20 secondi.
 
+**Binari.** Al primo avvio il server scarica da OpenStreetMap (Overpass) la rete ferroviaria
+italiana, una volta sola (~25 minuti, poi `data/rail.bin`). I treni scorrono lungo il percorso
+reale calcolato sui binari tra le due località, invece che in linea retta.
+
+**Percorso del mezzo selezionato.** Cliccando un treno si vede tutto il viaggio, dalla prima
+all'ultima fermata: la parte già percorsa è sfumata, quella ancora da fare è a colore pieno.
+Per bus e tram la forma della corsa viene dal GTFS statico del feed (campo `static` in
+`feeds.json`), scaricato una volta a settimana.
+
 ## Aggiungere una città
 
 Aggiungi una voce a `feeds.json` con l'URL del feed VehiclePositions e il riquadro
