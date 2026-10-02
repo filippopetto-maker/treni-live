@@ -22,12 +22,15 @@ export async function fetchWithTimeout(url, opts = {}, ms = 15000) {
 /**
  * Limita le richieste verso un host: massimo `rps` richieste al secondo e
  * `concurrency` in parallelo. Due code: 'hi' (aggiornamento treni già noti)
- * ha sempre la precedenza su 'lo' (scoperta di nuovi treni dai tabelloni).
+ * e 'lo' (scoperta di nuovi treni dai tabelloni). 'lo' riceve comunque una
+ * quota garantita (`loShare`) così la scoperta non resta mai ferma.
  */
 export class Limiter {
-  constructor({ concurrency = 4, rps = 8 } = {}) {
+  constructor({ concurrency = 4, rps = 8, loShare = 0.35 } = {}) {
     this.concurrency = concurrency;
     this.gap = 1000 / rps;
+    this.loShare = loShare;
+    this.credit = 0;
     this.active = 0;
     this.hi = [];
     this.lo = [];
@@ -64,7 +67,14 @@ export class Limiter {
         return;
       }
       this.last = Date.now();
-      const job = this.hi.length ? this.hi.shift() : this.lo.shift();
+      let job;
+      this.credit += this.loShare;
+      if (this.lo.length && (this.credit >= 1 || !this.hi.length)) {
+        job = this.lo.shift();
+        this.credit = Math.max(0, this.credit - 1);
+      } else {
+        job = this.hi.shift();
+      }
       this.active++;
       Promise.resolve()
         .then(job.fn)

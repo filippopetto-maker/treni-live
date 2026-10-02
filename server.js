@@ -81,6 +81,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/status') {
       return send(req, res, 200, { viaggiatreno: vt.stats(), italo: italo.stats(), feeds: transit.list() });
     }
+    if (url.pathname === '/api/debug') {
+      // Treni seguiti ma non disegnati, con il motivo: utile per migliorare la copertura.
+      const out = [...vt.trains.values()]
+        .filter((t) => !(t.seg?.status === 'running' || t.seg?.status === 'station'))
+        .map((t) => ({ key: t.key, label: t.label, upd: !!t.upd, seg: t.seg, stops: t.stops?.length }));
+      return send(req, res, 200, out);
+    }
     if (url.pathname === '/api/feeds') {
       return send(req, res, 200, transit.list());
     }

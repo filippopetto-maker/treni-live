@@ -91,11 +91,19 @@ export class ViaggiaTrenoTracker {
       return;
     }
     if (!Array.isArray(list)) return;
+    const now = Date.now();
     for (const t of list) {
       if (!t.codOrigine || !t.numeroTreno || t.provvedimento === 1) continue;
       const key = `${t.codOrigine}/${t.numeroTreno}/${t.dataPartenzaTreno}`;
       if (this.trains.has(key)) continue;
       const label = (t.compNumeroTreno || `${t.categoria} ${t.numeroTreno}`).trim();
+      // Treno non ancora partito dall'origine: inutile interrogarlo subito.
+      // Se parte da qui lo controllo 2 minuti prima, altrimenti 45 minuti prima del passaggio qui.
+      let nextRefresh = now;
+      if (kind === 'partenze' && t.nonPartito && t.orarioPartenza > now) {
+        nextRefresh = t.codOrigine === hub.code ? t.orarioPartenza - 2 * 60_000 : t.orarioPartenza - 45 * 60_000;
+        nextRefresh = Math.max(now, nextRefresh);
+      }
       this.trains.set(key, {
         id: 'vt:' + key,
         key,
@@ -104,7 +112,7 @@ export class ViaggiaTrenoTracker {
         cat: categoryOf(label),
         op: OPERATORS[t.codiceCliente] || 'Trenitalia',
         dest: t.destinazione,
-        nextRefresh: Date.now(),
+        nextRefresh,
         inflight: false,
         misses: 0,
         seg: null,
@@ -253,10 +261,20 @@ export class ViaggiaTrenoTracker {
   }
 
   stats() {
+    const perStato = {};
+    const now = Date.now();
+    for (const t of this.trains.values()) {
+      const k = !t.upd
+        ? t.nextRefresh > now
+          ? 'partenza_successiva'
+          : 'in_attesa_di_aggiornamento'
+        : t.seg?.status || 'posizione_non_calcolabile';
+      perStato[k] = (perStato[k] || 0) + 1;
+    }
     return {
       seguiti: this.trains.size,
-      visibili: [...this.trains.values()].filter((t) => t.seg?.status === 'running' || t.seg?.status === 'station')
-        .length,
+      visibili: (perStato.running || 0) + (perStato.station || 0),
+      perStato,
       rfiCircolanti: this.rfiCircolanti,
       giriTabelloni: this.sweeps,
       durataGiroS: this.lastSweepMs && Math.round(this.lastSweepMs / 1000),
