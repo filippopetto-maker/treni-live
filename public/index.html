@@ -16,7 +16,39 @@
       <button id="collapse" title="Riduci pannello" aria-label="Riduci pannello">–</button>
     </header>
 
-    <div class="body">
+    <nav class="tabs">
+      <button data-tab="tab-map" class="on">🗺️ Mappa live</button>
+      <button data-tab="tab-nav">🧭 Percorso</button>
+    </nav>
+
+    <div class="body tab hidden" id="tab-nav">
+      <div class="navform">
+        <div class="place">
+          <i class="pin-dot from"></i>
+          <input id="navFrom" type="text" placeholder="Partenza: indirizzo, luogo o fermata" autocomplete="off" />
+          <button id="navHere" type="button" title="La mia posizione">◎</button>
+          <ul class="sugg"></ul>
+        </div>
+        <div class="place">
+          <i class="pin-dot to"></i>
+          <input id="navTo" type="text" placeholder="Arrivo" autocomplete="off" />
+          <button id="navSwap" type="button" title="Inverti">⇅</button>
+          <ul class="sugg"></ul>
+        </div>
+        <div class="when">
+          <select id="navWhen">
+            <option value="now">Parti adesso</option>
+            <option value="at">Parti alle…</option>
+          </select>
+          <input id="navTime" class="hidden" type="datetime-local" />
+          <button id="navClear" type="button">Azzera</button>
+        </div>
+      </div>
+      <p id="navMsg" class="muted">Roma e Milano: bus, tram, metro e treni. Tasto destro sulla mappa per scegliere un punto; zoomando vedi le fermate con le prossime partenze.</p>
+      <ol id="navResults"></ol>
+    </div>
+
+    <div class="body tab" id="tab-map">
       <form id="search" autocomplete="off">
         <input id="q" type="search" placeholder="Cerca treno (es. 9651, Italo 8981)" />
       </form>
@@ -42,5 +74,6 @@
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="app.js"></script>
+  <script src="nav.js"></script>
 </body>
 </html>

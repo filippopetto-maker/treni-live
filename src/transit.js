@@ -8,7 +8,7 @@ import { GtfsStatic } from './gtfs-static.js';
 
 // ---------- decoder protobuf minimale ----------
 
-class Reader {
+export class Reader {
   constructor(buf) {
     this.b = buf;
     this.p = 0;
@@ -26,6 +26,18 @@ class Reader {
       mul *= 128;
     } while (byte & 0x80);
     return r;
+  }
+  /** int32 con segno: i negativi arrivano come varint da 10 byte, contano i 32 bit bassi. */
+  int32() {
+    let lo = 0;
+    let shift = 0;
+    let byte;
+    do {
+      byte = this.b[this.p++];
+      if (shift < 32) lo |= (byte & 0x7f) << shift;
+      shift += 7;
+    } while (byte & 0x80);
+    return lo | 0;
   }
   bytes() {
     const n = this.varint();
@@ -54,7 +66,7 @@ class Reader {
   }
 }
 
-function parse(buf, fields) {
+export function parse(buf, fields) {
   const r = new Reader(buf);
   while (!r.eof()) {
     const tag = r.varint();
@@ -102,6 +114,55 @@ export function decodeVehiclePositions(buf) {
   return out;
 }
 
+/**
+ * Ritardi dal feed TripUpdates: Map trip_id → { cancelled, upd: [{ seq, stop, delay, time }] }.
+ * `delay` in secondi (può mancare), `time` in secondi Unix (può mancare).
+ */
+export function decodeTripUpdates(buf) {
+  const out = new Map();
+  const event = (r) => {
+    const e = {};
+    parse(r.bytes(), {
+      1: (r2) => (e.delay = r2.int32()),
+      2: (r2) => (e.time = r2.varint()),
+    });
+    return e;
+  };
+  parse(buf, {
+    2: (r) =>
+      parse(r.bytes(), {
+        3: (r2) => {
+          let trip = null;
+          let cancelled = false;
+          let tripDelay;
+          const upd = [];
+          parse(r2.bytes(), {
+            1: (r3) =>
+              parse(r3.bytes(), {
+                1: (r4) => (trip = r4.string()),
+                4: (r4) => (cancelled = r4.varint() === 3),
+              }),
+            2: (r3) => {
+              const u = {};
+              parse(r3.bytes(), {
+                1: (r4) => (u.seq = r4.varint()),
+                2: (r4) => (u.arr = event(r4)),
+                3: (r4) => (u.dep = event(r4)),
+                4: (r4) => (u.stop = r4.string()),
+                5: (r4) => (u.skipped = r4.varint() === 1),
+              });
+              const e = u.arr || u.dep || {};
+              upd.push({ seq: u.seq, stop: u.stop, delay: e.delay, time: e.time, skipped: u.skipped });
+            },
+            5: (r3) => (tripDelay = r3.int32()),
+          });
+          if (trip) out.set(trip, { cancelled, delay: tripDelay, upd });
+        },
+      }),
+  });
+  return out;
+}
+
 // ---------- gestione dei feed ----------
 
 export class TransitFeeds {
@@ -144,7 +205,35 @@ export class TransitFeeds {
     }));
   }
 
+  /** Ritardi in tempo reale (TripUpdates) del feed, con cache di 30 s. null se il feed non li ha. */
+  async tripUpdates(feedId) {
+    const feed = this.feeds.find((f) => f.id === feedId);
+    if (!feed?.tripUpdates) return null;
+    this.tu ||= new Map();
+    const c = this.tu.get(feedId);
+    if (c && Date.now() - c.at < 30_000) return c;
+    if (c?.p) return c.p;
+    const p = (async () => {
+      try {
+        const res = await fetchWithTimeout(feed.tripUpdates, { headers: feed.headers || {} }, 20_000);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const entry = { at: Date.now(), trips: decodeTripUpdates(Buffer.from(await res.arrayBuffer())) };
+        this.tu.set(feedId, entry);
+        return entry;
+      } catch (e) {
+        log(`Ritardi ${feedId}: ${e.message}`);
+        const entry = { at: Date.now(), trips: c?.trips || new Map(), error: e.message };
+        this.tu.set(feedId, entry);
+        return entry;
+      }
+    })();
+    this.tu.set(feedId, { ...(c || { at: 0 }), p });
+    return p;
+  }
+
   async vehicles(feed) {
+    // Feed solo con orari statici (es. Milano): niente posizioni in tempo reale.
+    if (!feed.url) return { at: Date.now(), vehicles: [], error: null };
     const c = this.cache.get(feed.id);
     if (c && Date.now() - c.at < (feed.refreshMs || 20_000)) return c;
     if (this.inflight.has(feed.id)) return this.inflight.get(feed.id);

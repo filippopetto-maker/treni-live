@@ -61,10 +61,12 @@ export class GtfsStatic {
         short: r.route_short_name || r.route_id,
         long: r.route_long_name || '',
         color: r.route_color ? '#' + r.route_color : null,
+        type: r.route_type,
       });
     });
     await readCsv(path.join(this.dir, 'trips.txt'), (r) => {
-      this.trips.set(r.trip_id, [r.route_id, r.shape_id, r.trip_headsign || '']);
+      // [linea, forma, destinazione, servizio (calendario)]
+      this.trips.set(r.trip_id, [r.route_id, r.shape_id, r.trip_headsign || '', r.service_id]);
     });
     const tmp = new Map();
     await readCsv(path.join(this.dir, 'shapes.txt'), (r) => {

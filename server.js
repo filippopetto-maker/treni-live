@@ -13,6 +13,7 @@ import { ItaloTracker } from './src/italo.js';
 import { TransitFeeds } from './src/transit.js';
 import { RailNetwork } from './src/rail.js';
 import { trainRoute } from './src/routes.js';
+import { Planner } from './src/planner/index.js';
 import { log, activity } from './src/util.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,7 @@ const vt = new ViaggiaTrenoTracker({
 const italo = new ItaloTracker({ stations, rail });
 const transit = new TransitFeeds(path.join(ROOT, 'feeds.json'), path.join(ROOT, 'data'));
 await transit.load();
+const planner = new Planner({ dataDir: path.join(ROOT, 'data'), transit, stations, trackers: [vt, italo], rail });
 rail.start();
 vt.start();
 italo.start();
@@ -135,6 +137,36 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/feeds') {
       return send(req, res, 200, transit.list());
     }
+    // ---------- navigatore ----------
+    const ll = (s) => {
+      const [lat, lon] = (s || '').split(',').map(Number);
+      return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+    };
+    if (url.pathname === '/api/plan') {
+      activity.touch();
+      const p = url.searchParams;
+      const from = ll(p.get('from'));
+      const to = ll(p.get('to'));
+      if (!from || !to) return send(req, res, 400, { error: 'partenza o arrivo mancante' });
+      from.name = p.get('fromName') || '';
+      to.name = p.get('toName') || '';
+      const time = Number(p.get('time')) || Date.now();
+      return send(req, res, 200, await planner.plan(from, to, time));
+    }
+    if (url.pathname === '/api/stops') {
+      const bb = (url.searchParams.get('bbox') || '').split(',').map(Number);
+      if (bb.length !== 4 || bb.some(Number.isNaN)) return send(req, res, 400, { error: 'bbox non valido' });
+      return send(req, res, 200, await planner.stopsInBbox(bb));
+    }
+    if (url.pathname === '/api/stop/arrivals') {
+      activity.touch();
+      const r = await planner.arrivals(url.searchParams.get('id') || '');
+      return r ? send(req, res, 200, r) : send(req, res, 404, { error: 'fermata non trovata' });
+    }
+    if (url.pathname === '/api/geocode') {
+      return send(req, res, 200, await planner.geocode(url.searchParams.get('q'), ll(url.searchParams.get('near'))));
+    }
+
     if (url.pathname === '/api/transit') {
       const bb = (url.searchParams.get('bbox') || '').split(',').map(Number);
       if (bb.length !== 4 || bb.some(Number.isNaN)) return send(req, res, 400, { error: 'bbox non valido' });

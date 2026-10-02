@@ -3,8 +3,15 @@
     "id": "roma",
     "name": "Roma — ATAC e Roma TPL (Roma Mobilità)",
     "url": "https://romamobilita.it/wp-content/uploads/shared/rome_rtgtfs_vehicle_positions_feed.pb",
+    "tripUpdates": "https://romamobilita.it/wp-content/uploads/shared/rome_rtgtfs_trip_updates_feed.pb",
     "static": "https://romamobilita.it/wp-content/uploads/shared/rome_static_gtfs.zip",
     "bbox": [12.2, 41.65, 12.85, 42.1],
     "refreshMs": 20000
+  },
+  {
+    "id": "milano",
+    "name": "Milano — ATM (solo orari, niente posizioni live)",
+    "static": "https://dati.comune.milano.it/gtfs.zip",
+    "bbox": [8.95, 45.33, 9.42, 45.62]
   }
 ]
