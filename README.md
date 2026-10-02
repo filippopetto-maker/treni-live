@@ -125,3 +125,17 @@ Le API di ViaggiaTreno e Italo non sono ufficiali e possono cambiare senza preav
 limita le richieste (8/s verso ViaggiaTreno, 3/s verso Italo): non alzare troppo questi valori,
 per non farsi bloccare. Progetto per uso personale, non affiliato a Trenitalia, RFI, Italo o alle
 aziende di trasporto.
+
+## Navigatore (Roma e Milano)
+
+Scheda **🧭 Percorso** nel pannello: scrivi partenza e arrivo (indirizzo, luogo, fermata o stazione),
+oppure tasto destro sulla mappa → "Parti da qui" / "Arriva qui".
+
+- Percorsi calcolati con RAPTOR su bus, tram, metro (GTFS di Roma Mobilità e ATM) **più i treni live**
+  seguiti dalla mappa (orari reali + ritardo attuale), con cambi a piedi tra stazione e fermate.
+- Roma: ritardi in tempo reale dei bus (feed TripUpdates), segnati come "live". Milano: solo orari programmati
+  (ATM non pubblica un feed in tempo reale aperto).
+- Zoomando molto (livello 15+) compaiono le fermate: cliccandole vedi le prossime partenze per linea, aggiornate ogni 30 s.
+- Al primo uso gli orari vengono convertiti in una cache binaria (`data/gtfs/<città>/net.bin`, ~10 s);
+  la rete resta in memoria solo mentre la usi (si libera dopo 30 min di inattività).
+- Ricerca indirizzi: Photon (OpenStreetMap).
