@@ -1,0 +1,13 @@
+{
+  "name": "treni-live-italia",
+  "version": "0.1.0",
+  "description": "Mappa in tempo reale di treni (Trenitalia, Trenord, Italo…) e mezzi pubblici urbani in Italia",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

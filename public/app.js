@@ -1,0 +1,314 @@
+// Treni Live Italia — frontend.
+// I treni arrivano dal server come tratti (da [lon,lat,t] a [lon,lat,t]);
+// qui li si interpola ogni secondo per farli scorrere sulla mappa.
+
+const TRAIN_POLL_MS = 15_000;
+const TRANSIT_POLL_MS = 20_000;
+const TRANSIT_MIN_ZOOM = 11;
+const COLORS = { av: '#d6202a', italo: '#8a1538', ic: '#1f5fbf', reg: '#2e9e5b' };
+
+const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+const map = new maplibregl.Map({
+  container: 'map',
+  style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
+  center: [12.6, 42.1],
+  zoom: 5.4,
+  minZoom: 4,
+  maxBounds: [[2, 33], [24, 50]],
+  attributionControl: { compact: true },
+});
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), 'top-right');
+
+let trains = [];
+let clockOffset = 0; // ora server − ora browser
+const enabled = new Set(['av', 'italo', 'ic', 'reg']);
+let transitOn = true;
+let transitTimer = null;
+let openPopup = null;
+let followId = null;
+
+const $ = (s) => document.querySelector(s);
+
+// ---------- dati treni ----------
+
+async function pollTrains() {
+  try {
+    const r = await fetch('/api/trains');
+    const data = await r.json();
+    clockOffset = data.now - Date.now();
+    trains = data.trains;
+    updateCounts();
+    renderTrains();
+    refreshStatus();
+  } catch (e) {
+    $('#status').textContent = 'Server non raggiungibile: è avviato? (node server.js)';
+  }
+}
+
+function position(t, now) {
+  const [x0, y0, t0] = t.from;
+  const [x1, y1, t1] = t.to;
+  if (t1 <= t0) return [x1, y1];
+  // Si ferma poco prima della prossima fermata se il treno è in ritardo sulla stima.
+  const f = Math.max(0, Math.min(0.98, (now - t0) / (t1 - t0)));
+  return [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f];
+}
+
+function trainFeatures() {
+  const now = Date.now() + clockOffset;
+  const features = [];
+  for (const t of trains) {
+    if (!enabled.has(t.cat)) continue;
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: position(t, now) },
+      properties: { id: t.id, cat: t.cat, delay: t.delay, label: t.label, station: t.status === 'station' },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function renderTrains() {
+  const src = map.getSource('trains');
+  if (!src) return;
+  src.setData(trainFeatures());
+  if (followId) {
+    const t = trains.find((x) => x.id === followId);
+    if (t && openPopup) openPopup.setLngLat(position(t, Date.now() + clockOffset));
+  }
+}
+
+function updateCounts() {
+  const c = { av: 0, italo: 0, ic: 0, reg: 0 };
+  for (const t of trains) c[t.cat]++;
+  for (const k in c) $(`[data-count="${k}"]`).textContent = c[k].toLocaleString('it-IT');
+}
+
+async function refreshStatus() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    const v = s.viaggiatreno;
+    const total = trains.length.toLocaleString('it-IT');
+    const time = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    let txt = `${total} treni sulla mappa · aggiornato alle ${time}`;
+    if (v.rfiCircolanti) txt += ` · RFI ne conta ${v.rfiCircolanti.toLocaleString('it-IT')} in circolazione (Italo escluso)`;
+    if (v.giriTabelloni === 0) txt += ' · primo giro dei tabelloni in corso, i treni compaiono man mano';
+    $('#status').textContent = txt;
+  } catch {}
+}
+
+// ---------- mezzi urbani ----------
+
+async function pollTransit() {
+  clearTimeout(transitTimer);
+  const src = map.getSource('transit');
+  if (!src) return;
+  if (!transitOn || map.getZoom() < TRANSIT_MIN_ZOOM) {
+    src.setData({ type: 'FeatureCollection', features: [] });
+    $('#transitCount').textContent = transitOn ? 'zoom' : '–';
+    $('#hint').textContent = '';
+    return;
+  }
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((x) => x.toFixed(4)).join(',');
+  try {
+    const data = await (await fetch(`/api/transit?bbox=${bbox}`)).json();
+    src.setData({
+      type: 'FeatureCollection',
+      features: data.vehicles.map((v) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [v.lon, v.lat] },
+        properties: { ...v, route: v.route || '' },
+      })),
+    });
+    $('#transitCount').textContent = data.vehicles.length.toLocaleString('it-IT');
+    const errors = data.feeds.filter((f) => f.error);
+    $('#hint').textContent = !data.feeds.length
+      ? 'Nessun feed bus/tram in tempo reale configurato per questa zona (vedi feeds.json).'
+      : errors.length
+        ? `Feed non disponibile: ${errors.map((f) => f.name).join(', ')}`
+        : `Bus e tram: ${data.feeds.map((f) => f.name).join(', ')}`;
+  } catch {}
+  transitTimer = setTimeout(pollTransit, TRANSIT_POLL_MS);
+}
+
+// ---------- popup ----------
+
+const fmtTime = (t) => (t ? new Date(t).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '');
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const delayClass = (d) => (d > 15 ? 'bad' : d >= 5 ? 'warn' : 'ok');
+const delayText = (d) => (d > 0 ? `+${d} min` : d < 0 ? `${d} min (anticipo)` : 'in orario');
+
+async function showTrain(t, lngLat) {
+  followId = t.id;
+  openPopup?.remove();
+  const head = `
+    <h3><i class="dot ${t.cat}"></i>${esc(t.label)}</h3>
+    <div class="route">${esc(t.orig || '')} → ${esc(t.dest || '')}</div>
+    <dl>
+      <dt>Ritardo</dt><dd class="delay ${delayClass(t.delay)}">${delayText(t.delay)}</dd>
+      <dt>${t.status === 'station' ? 'In stazione' : 'Tra'}</dt>
+      <dd>${t.status === 'station' ? esc(t.prev) : `${esc(t.prev)} → ${esc(t.next)}`}</dd>
+      ${t.det ? `<dt>Rilevato</dt><dd>${esc(t.det)} ${fmtTime(t.detT)}</dd>` : ''}
+      <dt>Impresa</dt><dd>${esc(t.op)}</dd>
+    </dl>
+    ${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}`;
+  openPopup = new maplibregl.Popup({ offset: 10, maxWidth: '300px' })
+    .setLngLat(lngLat)
+    .setHTML(`<div class="pop">${head}<ul class="stops"><li>Carico le fermate…</li></ul></div>`)
+    .addTo(map);
+  openPopup.on('close', () => (followId = null));
+
+  try {
+    const d = await (await fetch(`/api/train?id=${encodeURIComponent(t.id)}`)).json();
+    const now = Date.now() + clockOffset;
+    const stops = (d.stops || [])
+      .map((s) => {
+        const sched = s.arr || s.dep;
+        const real = s.realArr || s.realDep;
+        const done = real && real <= now;
+        const cls = s.soppressa ? 'soppressa' : done ? 'done' : '';
+        const when = real ? fmtTime(real) : fmtTime(sched);
+        const late = real && sched && real - sched >= 60_000 ? ` <small>(${fmtTime(sched)})</small>` : '';
+        return `<li class="${cls}"><span>${esc(s.name)}</span><time>${when}${late}</time></li>`;
+      })
+      .join('');
+    const el = openPopup?.getElement()?.querySelector('.stops');
+    if (el) el.innerHTML = stops || '<li>Fermate non disponibili</li>';
+  } catch {}
+}
+
+function showVehicle(p, lngLat) {
+  followId = null;
+  openPopup?.remove();
+  const age = p.ts ? Math.round((Date.now() / 1000 - p.ts) / 60) : null;
+  openPopup = new maplibregl.Popup({ offset: 8 })
+    .setLngLat(lngLat)
+    .setHTML(
+      `<div class="pop"><h3><i class="dot bus"></i>Linea ${esc(p.route || '?')}</h3>
+       <dl>
+         <dt>Vettura</dt><dd>${esc(p.vlabel || p.vid || p.id)}</dd>
+         ${p.speed ? `<dt>Velocità</dt><dd>${p.speed} km/h</dd>` : ''}
+         ${age !== null ? `<dt>Posizione</dt><dd>${age <= 0 ? 'adesso' : `${age} min fa`}</dd>` : ''}
+       </dl></div>`
+    )
+    .addTo(map);
+}
+
+// ---------- mappa ----------
+
+map.on('load', () => {
+  // Etichette della mappa in italiano dove disponibili.
+  for (const layer of map.getStyle().layers) {
+    const tf = layer.type === 'symbol' && map.getLayoutProperty(layer.id, 'text-field');
+    if (tf && JSON.stringify(tf).includes('name')) {
+      map.setLayoutProperty(layer.id, 'text-field', ['coalesce', ['get', 'name:it'], ['get', 'name']]);
+    }
+  }
+
+  map.addSource('transit', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource('trains', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+  map.addLayer({
+    id: 'transit',
+    type: 'circle',
+    source: 'transit',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 3, 15, 6],
+      'circle-color': '#e08a00',
+      'circle-stroke-color': '#fff',
+      'circle-stroke-width': 1,
+    },
+  });
+  map.addLayer({
+    id: 'transit-label',
+    type: 'symbol',
+    source: 'transit',
+    minzoom: 14,
+    layout: {
+      'text-field': ['get', 'route'],
+      'text-font': ['Noto Sans Bold'],
+      'text-size': 10,
+      'text-offset': [0, 1.1],
+    },
+    paint: { 'text-color': '#a35f00', 'text-halo-color': '#fff', 'text-halo-width': 1.2 },
+  });
+
+  map.addLayer({
+    id: 'trains',
+    type: 'circle',
+    source: 'trains',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2.6, 8, 4, 12, 7],
+      'circle-color': ['match', ['get', 'cat'], 'av', COLORS.av, 'italo', COLORS.italo, 'ic', COLORS.ic, COLORS.reg],
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 0.8, 10, 2],
+      'circle-stroke-color': ['step', ['get', 'delay'], '#ffffff', 5, '#f0a202', 16, '#d6202a'],
+      'circle-opacity': ['case', ['get', 'station'], 0.75, 1],
+    },
+  });
+  map.addLayer({
+    id: 'trains-label',
+    type: 'symbol',
+    source: 'trains',
+    minzoom: 9.5,
+    layout: {
+      'text-field': ['get', 'label'],
+      'text-font': ['Noto Sans Regular'],
+      'text-size': 11,
+      'text-offset': [0, 1.2],
+      'text-anchor': 'top',
+      'text-optional': true,
+    },
+    paint: { 'text-color': dark ? '#eef0f4' : '#1d2330', 'text-halo-color': dark ? '#181b22' : '#ffffff', 'text-halo-width': 1.4 },
+  });
+
+  for (const layer of ['trains', 'transit']) {
+    map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''));
+  }
+  map.on('click', 'trains', (e) => {
+    const t = trains.find((x) => x.id === e.features[0].properties.id);
+    if (t) showTrain(t, e.features[0].geometry.coordinates);
+  });
+  map.on('click', 'transit', (e) => showVehicle(e.features[0].properties, e.features[0].geometry.coordinates));
+  map.on('moveend', pollTransit);
+
+  pollTrains();
+  setInterval(pollTrains, TRAIN_POLL_MS);
+  setInterval(renderTrains, 1000);
+});
+
+// ---------- controlli ----------
+
+document.querySelectorAll('[data-cat]').forEach((cb) =>
+  cb.addEventListener('change', () => {
+    cb.checked ? enabled.add(cb.dataset.cat) : enabled.delete(cb.dataset.cat);
+    renderTrains();
+  })
+);
+$('#transitToggle').addEventListener('change', (e) => {
+  transitOn = e.target.checked;
+  pollTransit();
+});
+$('#collapse').addEventListener('click', () => {
+  const p = $('#panel');
+  p.classList.toggle('collapsed');
+  $('#collapse').textContent = p.classList.contains('collapsed') ? '+' : '–';
+});
+$('#search').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = $('#q').value.trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!q) return;
+  const num = q.replace(/\D/g, '');
+  const t =
+    trains.find((x) => x.label.toUpperCase() === q) ||
+    trains.find((x) => num && x.label.replace(/\D/g, '') === num);
+  if (!t) {
+    $('#hint').textContent = `Nessun treno "${q}" in circolazione sulla mappa adesso.`;
+    return;
+  }
+  const pos = position(t, Date.now() + clockOffset);
+  map.flyTo({ center: pos, zoom: Math.max(map.getZoom(), 10) });
+  showTrain(t, pos);
+});

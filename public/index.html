@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Treni Live Italia</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <aside id="panel">
+    <header>
+      <h1>Treni Live <span>Italia</span></h1>
+      <button id="collapse" title="Riduci pannello" aria-label="Riduci pannello">–</button>
+    </header>
+
+    <div class="body">
+      <form id="search" autocomplete="off">
+        <input id="q" type="search" placeholder="Cerca treno (es. 9651, Italo 8981)" />
+      </form>
+
+      <div class="filters">
+        <label><input type="checkbox" data-cat="av" checked /><i class="dot av"></i>Frecce<b data-count="av">0</b></label>
+        <label><input type="checkbox" data-cat="italo" checked /><i class="dot italo"></i>Italo<b data-count="italo">0</b></label>
+        <label><input type="checkbox" data-cat="ic" checked /><i class="dot ic"></i>Intercity / EC<b data-count="ic">0</b></label>
+        <label><input type="checkbox" data-cat="reg" checked /><i class="dot reg"></i>Regionali<b data-count="reg">0</b></label>
+        <label><input type="checkbox" id="transitToggle" checked /><i class="dot bus"></i>Bus e tram<b id="transitCount">zoom</b></label>
+      </div>
+
+      <div class="legend">
+        <span><i class="ring ok"></i>in orario</span>
+        <span><i class="ring warn"></i>5–15'</span>
+        <span><i class="ring bad"></i>&gt;15'</span>
+      </div>
+
+      <p id="status">Avvio in corso…</p>
+      <p id="hint"></p>
+    </div>
+  </aside>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
