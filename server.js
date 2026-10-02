@@ -5,6 +5,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadStations } from './src/stations.js';
 import { ViaggiaTrenoTracker } from './src/viaggiatreno.js';
@@ -55,6 +56,19 @@ function send(req, res, status, body, type = 'application/json; charset=utf-8') 
   }
 }
 
+// Password opzionale (variabile TRENI_PASSWORD): il browser la chiede una volta e la ricorda.
+// Il nome utente è indifferente.
+const PASSWORD = process.env.TRENI_PASSWORD || '';
+function authorized(req) {
+  if (!PASSWORD) return true;
+  const h = req.headers.authorization || '';
+  if (!h.startsWith('Basic ')) return false;
+  const decoded = Buffer.from(h.slice(6), 'base64').toString('utf8');
+  const given = Buffer.from(decoded.slice(decoded.indexOf(':') + 1));
+  const expected = Buffer.from(PASSWORD);
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected);
+}
+
 function findTrain(id) {
   const [src, key] = [id.slice(0, id.indexOf(':')), id.slice(id.indexOf(':') + 1)];
   return src === 'vt' ? vt.trains.get(key) : src === 'italo' ? italo.trains.get(key) : null;
@@ -62,6 +76,10 @@ function findTrain(id) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  if (!authorized(req)) {
+    res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Treni Live", charset="UTF-8"', 'Content-Type': 'text/plain' });
+    return res.end('Password richiesta');
+  }
   try {
     if (url.pathname === '/api/trains') {
       return send(req, res, 200, { now: Date.now(), trains: [...vt.visible(), ...italo.visible()] });

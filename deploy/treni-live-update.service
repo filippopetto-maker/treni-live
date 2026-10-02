@@ -1,0 +1,6 @@
+[Unit]
+Description=Aggiorna Treni Live da git se ci sono novità
+
+[Service]
+Type=oneshot
+ExecStart=/opt/treni-live/deploy/update.sh

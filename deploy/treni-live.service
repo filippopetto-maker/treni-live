@@ -1,0 +1,19 @@
+[Unit]
+Description=Treni Live Italia
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=treni
+WorkingDirectory=/opt/treni-live
+EnvironmentFile=/etc/treni-live.env
+ExecStart=/usr/bin/node server.js
+# SIGINT fa salvare la cache dei percorsi prima di uscire
+KillSignal=SIGINT
+Restart=always
+RestartSec=5
+# Se dovesse crescere troppo in memoria, systemd lo riavvia invece di bloccare il server
+MemoryMax=900M
+
+[Install]
+WantedBy=multi-user.target
