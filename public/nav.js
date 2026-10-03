@@ -139,6 +139,11 @@ async function plan() {
   const seq = ++nav.seq;
   const time = $('#navWhen').value === 'now' ? now() : new Date($('#navTime').value).getTime() || now();
   $('#navMsg').textContent = 'Calcolo i percorsi…';
+  // La prima ricerca in una città carica gli orari: sul server gratuito ci vogliono ~10 secondi.
+  setTimeout(() => {
+    if (seq === nav.seq && $('#navMsg').textContent === 'Calcolo i percorsi…')
+      $('#navMsg').textContent = 'Calcolo i percorsi… (la prima ricerca in una città carica gli orari, circa 10 secondi)';
+  }, 2500);
   $('#navResults').innerHTML = '';
   const q = new URLSearchParams({
     from: `${nav.from.lat},${nav.from.lon}`,
