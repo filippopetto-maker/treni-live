@@ -18,6 +18,7 @@ import { fixStations } from './src/station-fix.js';
 import { ScheduledMetro } from './src/scheduled.js';
 import { MetroStatus } from './src/metro-status.js';
 import { NewsService } from './src/news.js';
+import { AstralNet } from './src/astral.js';
 import { log, activity } from './src/util.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -39,13 +40,19 @@ const planner = new Planner({ dataDir: path.join(ROOT, 'data'), transit, station
 const metroStatus = new MetroStatus();
 planner.metroStatus = metroStatus;
 transit.metro = new ScheduledMetro({ planner, status: metroStatus });
-const news = new NewsService({ stations, trackers: [vt, italo], metroStatus, cityFeeds: () => transit.feeds.filter((f) => f.static) });
+const astral = new AstralNet({ dataDir: path.join(ROOT, 'data'), rail });
+transit.astral = astral;
+planner.astral = astral;
+const news = new NewsService({ astral,  stations, trackers: [vt, italo], metroStatus, cityFeeds: () => transit.feeds.filter((f) => f.static) });
 rail.start();
 // Appena i binari sono pronti, corregge le stazioni con coordinate sbagliate (lontane dai binari).
 const railWait = setInterval(() => {
   if (!rail.ready) return;
   clearInterval(railWait);
-  fixStations({ dataDir: path.join(ROOT, 'data'), stations, rail }).catch((e) => log('Stazioni: correzione non riuscita:', e.message));
+  fixStations({ dataDir: path.join(ROOT, 'data'), stations, rail })
+    .catch((e) => log('Stazioni: correzione non riuscita:', e.message))
+    .then(() => astral.init())
+    .catch((e) => log('ASTRAL non disponibile:', e.message));
 }, 2000);
 vt.start();
 italo.start();
@@ -124,6 +131,7 @@ const server = http.createServer(async (req, res) => {
         viaggiatreno: vt.stats(),
         italo: italo.stats(),
         binari: rail.stats(),
+        corseFantasma: Object.fromEntries([...(planner.ghostCache || new Map())].map(([k, v]) => [k, v.set.size])),
         feeds: transit.list(),
       });
     }

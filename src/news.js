@@ -105,7 +105,8 @@ export function parseItalo(html) {
 }
 
 export class NewsService {
-  constructor({ stations, trackers, metroStatus, cityFeeds }) {
+  constructor({ stations, trackers, metroStatus, cityFeeds, astral }) {
+    this.astral = astral;
     this.st = stations;
     this.trackers = trackers;
     this.metroStatus = metroStatus;
@@ -144,6 +145,7 @@ export class NewsService {
         this.roma = JSON.parse(t).map((p) => ({ at: new Date(p.date).getTime(), title: decode(p.title?.rendered) }));
       }),
       this.metroStatus?.refresh(),
+      this.astral?.ready && this.astral.refresh(),
     ]).finally(() => {
       this.at = Date.now();
       this.inflight = null;
@@ -281,6 +283,7 @@ export class NewsService {
         urban.push({ src: 'Roma Mobilità', text: short(p.title, 190), level: classify(p.title) });
       }
     }
+    if (city === 'roma' && this.astral?.ready) urban.push(...this.astral.newsItems());
     if (city === 'milano' && this.metroStatus) {
       const lines = this.metroStatus.status.milano || {};
       const bad = Object.entries(lines).filter(([, s]) => s.level !== 'ok');

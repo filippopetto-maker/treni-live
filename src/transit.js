@@ -239,6 +239,7 @@ export class TransitFeeds {
 
   /** Percorso completo della corsa di un veicolo, dal GTFS statico del feed. */
   vehicleRoute(feedId, tripId, routeId) {
+    if (feedId === 'astral') return this.astral?.routeCoords(routeId) || null;
     return this.statics.get(feedId)?.route(tripId, routeId) || null;
   }
 
@@ -330,6 +331,14 @@ export class TransitFeeds {
         } catch (e) {
           log(`Metro ${f.id}: ${e.message}`);
         }
+      }
+    }
+    // Metromare e Roma–Viterbo (ASTRAL): orario + ritardi e soppressioni comunicati da ASTRAL.
+    if (this.astral && !(bb[2] < 11.8 || bb[0] > 12.75 || bb[3] < 41.6 || bb[1] > 42.5)) {
+      try {
+        metro.push(...(await this.astral.vehicles(bb)));
+      } catch (e) {
+        log(`ASTRAL: ${e.message}`);
       }
     }
     const metroStatus = this.metro?.status ? this.metro.status.summary(hit.map((f) => f.id)) : [];

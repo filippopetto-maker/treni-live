@@ -250,3 +250,7 @@ html, body { margin: 0; height: 100%; }
   .tk-track { animation-duration: 0s !important; }
   .tk-view { overflow-x: auto; }
 }
+
+/* Corse saltate / soppresse nelle partenze */
+.deplist .ghost, .legend-live .ghost { color: var(--muted); text-decoration: line-through; font-weight: 400; }
+.deplist .cancelled, .legend-live .cancelled { color: var(--bad); text-decoration: line-through; }

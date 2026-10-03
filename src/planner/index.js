@@ -99,17 +99,57 @@ export class Planner {
     return this.railNet;
   }
 
-  /** Stazioni ferroviarie vicine a fermate urbane: cambi a piedi tra treno e città. */
-  cross(net) {
-    if (this.crossCache.has(net.id)) return this.crossCache.get(net.id);
-    const rail = this.rail();
+  /** Stazioni (treni o ferrovie ASTRAL) vicine a fermate urbane: cambi a piedi tra le reti. */
+  cross(net, other = this.rail()) {
+    const key = `${other.id}>${net.id}`;
+    if (this.crossCache.has(key)) return this.crossCache.get(key);
     const pairs = [];
-    rail.stops.forEach((s, i) => {
+    other.stops.forEach((s, i) => {
       if (!inBbox(net.feed.bbox, s.lat, s.lon)) return;
       for (const [j, d] of net.near(s.lat, s.lon, CROSS_M)) pairs.push([i, j, walkSeconds(d) + 60]);
     });
-    this.crossCache.set(net.id, pairs);
+    this.crossCache.set(key, pairs);
     return pairs;
+  }
+
+  /**
+   * Corse "fantasma": secondo l'orario sono partite da almeno 5 minuti e sono ancora in viaggio,
+   * ma non compaiono nei dati in tempo reale, mentre altre corse della stessa linea sì.
+   * Quasi sempre sono corse saltate (o vetture col localizzatore spento): non le proponiamo.
+   */
+  async ghostTrips(net, lt) {
+    const feed = net.feed;
+    if (!feed.url || !feed.tripUpdates) return new Set();
+    const c = this.ghostCache?.get(net.id);
+    if (c && Date.now() - c.at < 30_000) return c.set;
+    const [vp, tu] = await Promise.all([this.transit.vehicles(feed), this.transit.tripUpdates(feed.id)]);
+    const seen = new Set(vp?.vehicles?.map((v) => v.trip));
+    for (const id of tu?.trips?.keys() || []) seen.add(id);
+    const st = net.statics;
+    const liveRoutes = new Set();
+    for (const id of seen) {
+      const r = st.trips.get(id)?.[0];
+      if (r) liveRoutes.add(r);
+    }
+    const ghosts = new Set();
+    const sets = [{ d: net.day(lt.ymd), shift: 0 }];
+    if (lt.sec < 4 * 3600) sets.push({ d: net.day(prevYmd(lt.ymd)), shift: -86400 });
+    for (const { d, shift } of sets) {
+      for (const P of d.patterns) {
+        const first = net.tripIds[P.trips[0]];
+        const route = st.trips.get(first)?.[0];
+        if (!liveRoutes.has(route)) continue; // linea senza dati live: non possiamo giudicare
+        for (let j = 0; j < P.trips.length; j++) {
+          const dep = P.dep[j * P.n] + shift;
+          const arr = P.arr[j * P.n + P.n - 1] + shift;
+          if (lt.sec < dep + 300 || lt.sec > arr) continue;
+          const t = P.trips[j];
+          if (!seen.has(net.tripIds[t])) ghosts.add(t);
+        }
+      }
+    }
+    (this.ghostCache ||= new Map()).set(net.id, { at: Date.now(), set: ghosts });
+    return ghosts;
   }
 
   /** Reti da usare per un viaggio: città toccate da partenza/arrivo + treni live. */
@@ -140,10 +180,27 @@ export class Planner {
           for (const t of ban) delay[t] = 1e7;
         }
       }
+      if (live && Math.abs(timeMs - Date.now()) < 15 * 60_000) {
+        const ghosts = await this.ghostTrips(net, lt);
+        if (ghosts.size) {
+          delay = delay ? Int32Array.from(delay) : new Int32Array(net.tripIds.length);
+          for (const t of ghosts) delay[t] = 1e7;
+        }
+      }
       const sets = [{ d: net.day(lt.ymd), shift: 0, delay: early ? null : delay }];
       if (early) sets.push({ d: net.day(prevYmd(lt.ymd)), shift: -86400, delay });
       views.push({ net, off, slack: 60, sets, kind: 'city' });
       off += net.stops.length;
+      // Metromare e Roma–Viterbo insieme alla rete di Roma.
+      if (f.id === 'roma' && this.astral && live) {
+        try {
+          await this.astral.refresh();
+          views.push({ net: this.astral, off, slack: 120, sets: [{ d: this.astral.day(lt.midnight), shift: 0, delay: null }], kind: 'astral' });
+          off += this.astral.stops.length;
+        } catch (e) {
+          log('ASTRAL non disponibile per il navigatore:', e.message);
+        }
+      }
     }
     if (timeMs > Date.now() - 3600_000 && timeMs < Date.now() + 6 * 3600_000) {
       const rail = this.rail();
@@ -187,24 +244,25 @@ export class Planner {
       for (const v of views)
         if (v.kind === 'city') for (const [i, d] of v.net.near(p.lat, p.lon, ACCESS_MAX_M)) out.push([v.off + i, walkSeconds(d)]);
     for (const v of views)
-      if (v.kind === 'rail') for (const [i, d] of v.net.near(p.lat, p.lon, RAIL_ACCESS_M)) out.push([v.off + i, walkSeconds(d)]);
+      if (v.kind === 'rail' || v.kind === 'astral') for (const [i, d] of v.net.near(p.lat, p.lon, RAIL_ACCESS_M)) out.push([v.off + i, walkSeconds(d)]);
     return out;
   }
 
   crossMap(views) {
     const m = new Map();
-    const rail = views.find((v) => v.kind === 'rail');
-    if (!rail) return m;
     const add = (a, b, s) => {
       let l = m.get(a);
       if (!l) m.set(a, (l = []));
       l.push([b, s]);
     };
-    for (const v of views) {
-      if (v.kind !== 'city') continue;
-      for (const [i, j, s] of this.cross(v.net)) {
-        add(rail.off + i, v.off + j, s);
-        add(v.off + j, rail.off + i, s);
+    for (const o of views) {
+      if (o.kind === 'city') continue; // treni e ferrovie ASTRAL ↔ fermate urbane
+      for (const v of views) {
+        if (v.kind !== 'city') continue;
+        for (const [i, j, s] of this.cross(v.net, o.net)) {
+          add(o.off + i, v.off + j, s);
+          add(v.off + j, o.off + i, s);
+        }
       }
     }
     return m;
@@ -360,6 +418,19 @@ export class Planner {
         trainId: tr.id,
         coords: this.railCoords(v.net, P, l.b, l.e),
       });
+    } else if (v.kind === 'astral') {
+      const i = P.info;
+      Object.assign(leg, {
+        mode: 'metro',
+        line: i.line,
+        lineName: i.name,
+        color: i.color,
+        headsign: i.dest,
+        delay: i.delay * 60,
+        live: true,
+        alert: i.bus ? 'Corsa con bus sostitutivo' : undefined,
+        coords: P.dir.segs.slice(l.b, l.e).flatMap((c, k) => (k ? c.slice(1) : c)),
+      });
     } else {
       const t = P.trips[l.j];
       const info = v.net.tripInfo(t);
@@ -441,6 +512,10 @@ export class Planner {
       if (s.lon >= x0 && s.lon <= x1 && s.lat >= y0 && s.lat <= y1)
         out.push({ id: `rail:${s.id}`, name: titleCase(s.name), lat: s.lat, lon: s.lon, rail: true });
     }
+    if (this.astral?.ready)
+      this.astral.stops.forEach((s, i) => {
+        if (s.lon >= x0 && s.lon <= x1 && s.lat >= y0 && s.lat <= y1) out.push({ id: `astral:${i}`, name: s.name, lat: s.lat, lon: s.lon, rail: true });
+      });
     return out.slice(0, 4000);
   }
 
@@ -451,7 +526,35 @@ export class Planner {
     const lt = localTime(now);
     const out = [];
     let stop;
-    if (src === 'rail') {
+    if (src === 'astral') {
+      if (!this.astral) return null;
+      await this.astral.refresh();
+      const s = +key;
+      stop = this.astral.stops[s];
+      if (!stop) return null;
+      const d = this.astral.day(lt.midnight);
+      for (let e = d.spOff[s]; e < d.spOff[s + 1]; e++) {
+        const P = d.patterns[d.spP[e]];
+        const pos = d.spPos[e];
+        if (pos === P.n - 1) continue;
+        const t = lt.midnight + P.dep[pos] * 1000;
+        if (t < now - 60_000 || t > now + minutes * 60_000) continue;
+        const i = P.info;
+        out.push({ t, line: i.line, mode: 'metro', headsign: i.dest, color: i.color, delay: i.delay * 60, live: true, alert: i.bus ? 'bus sostitutivo' : undefined });
+      }
+      // Corse soppresse: si mostrano barrate, così si sa che non passano.
+      for (const dir of this.astral.dirs) {
+        const pos = dir.stations.indexOf(s);
+        if (pos < 0 || pos === dir.stations.length - 1) continue;
+        for (const tr of this.astral.trips.get(dir.code) || []) {
+          if (!tr.soppressa) continue;
+          const t = lt.midnight + (tr.start + dir.cum[pos]) * 1000;
+          if (t < now - 60_000 || t > now + minutes * 60_000) continue;
+          out.push({ t, line: dir.line.short, mode: 'metro', headsign: tr.dest.replace(/ Stazione$/i, ''), color: dir.line.color, cancelled: true });
+        }
+      }
+      stop = { name: stop.name, lat: stop.lat, lon: stop.lon };
+    } else if (src === 'rail') {
       const rail = this.rail();
       const s = rail.byCode.get(key);
       if (s === undefined) return null;
@@ -482,6 +585,7 @@ export class Planner {
         const tu = await this.transit.tripUpdates(feed.id);
         if (tu?.trips?.size) net.applyDelays(tu.trips);
       }
+      const ghosts = await this.ghostTrips(net, lt).catch(() => new Set());
       const sets = [{ d: net.day(lt.ymd), shift: 0 }];
       if (lt.sec < 4 * 3600) sets.push({ d: net.day(prevYmd(lt.ymd)), shift: -86400 });
       for (const { d, shift } of sets) {
@@ -504,6 +608,7 @@ export class Planner {
             out.push({
               t, mode: info.mode, headsign: info.headsign, ...lineInfo(net.id, info),
               delay: live ? delay : null, live, feed: net.id, tripId: info.tripId, alert: alert?.text,
+              ghost: ghosts.has(ti) || undefined,
             });
           }
         }

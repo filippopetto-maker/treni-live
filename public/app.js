@@ -306,7 +306,7 @@ function renderMetro() {
     return {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: pos },
-      properties: { id: v.id, feed: v.feed, trip: v.trip, route: v.route, rname: v.rname, dest: v.dest, color: v.color, mode: 'metro', next: v.next, scheduled: true, alert: v.alert?.level || 'ok', alertText: v.alert?.text || '' },
+      properties: { id: v.id, feed: v.feed, trip: v.trip, route: v.route, rname: v.rname, lineName: v.lineName || '', dest: v.dest, color: v.color, mode: 'metro', next: v.next, scheduled: true, alert: v.alert?.level || 'ok', alertText: v.alert?.text || '' },
     };
   });
   src.setData({ type: 'FeatureCollection', features });
@@ -317,6 +317,7 @@ function renderMetro() {
 const LINE_COLORS = {
   A: '#d6202a', B: '#0a5db4', B1: '#0a5db4', C: '#2fa84f',
   M1: '#e2231a', M2: '#00a650', M3: '#f9a800', M4: '#0072bc', M5: '#8c4fa3',
+  ML: '#0096c7', RV: '#8e44ad',
 };
 const LEVEL_TEXT = { ok: 'regolare', warn: 'rallentata', station: 'stazione chiusa', stop: 'interrotta', info: 'avviso' };
 let metroStatusByLine = {};
@@ -412,14 +413,16 @@ function showVehicle(p, lngLat) {
     mode === 'metro'
       ? `<dt>Prossima</dt><dd>${esc(p.next || '')}</dd>
          <dt>Linea</dt><dd class="${p.alert && p.alert !== 'ok' ? 'warnline' : ''}">${esc(p.alertText || (metroStatusByLine[`${p.feed}/${p.rname}`] ? 'regolare (nessun avviso in corso)' : 'stato non disponibile'))}</dd>
-         <dt>Posizione</dt><dd>stimata dall'orario <small>(la metro non trasmette la posizione; le tratte dichiarate ferme vengono tolte)</small></dd>`
+         <dt>Posizione</dt><dd>${p.feed === 'astral'
+           ? "orario + ritardo comunicato da ASTRAL <small>(le corse soppresse non compaiono)</small>"
+           : "stimata dall'orario <small>(la metro non trasmette la posizione; le tratte dichiarate ferme vengono tolte)</small>"}</dd>`
       : `<dt>Vettura</dt><dd>${esc(p.vlabel || p.vid || p.id)}</dd>
          ${p.speed ? `<dt>Velocità</dt><dd>${p.speed} km/h</dd>` : ''}
          ${age !== null ? `<dt>Posizione</dt><dd>${age <= 0 ? 'adesso' : `${age} min fa`}</dd>` : ''}`;
   openPopup = new maplibregl.Popup({ offset: 8 })
     .setLngLat(lngLat)
     .setHTML(
-      `<div class="pop"><h3><i class="dot" style="background:${esc(color)}"></i>${MODE_NAMES[mode] || 'Linea'} ${esc(p.rname || p.route || '?')}</h3>
+      `<div class="pop"><h3><i class="dot" style="background:${esc(color)}"></i>${p.lineName ? esc(p.lineName) : `${MODE_NAMES[mode] || 'Linea'} ${esc(p.rname || p.route || '?')}`}</h3>
        ${p.dest ? `<div class="route">→ ${esc(p.dest)}</div>` : ''}
        <dl>${body}</dl></div>`
     )

@@ -29,9 +29,17 @@ const M_LAT = 110_540;
 const M_LON = 111_320 * Math.cos((42 * Math.PI) / 180); // approssimazione valida per l'Italia
 
 export class RailNetwork {
-  constructor({ dataDir, stations }) {
-    this.binFile = path.join(dataDir, 'rail.bin');
-    this.pathsFile = path.join(dataDir, 'paths-v2.json');
+  /**
+   * Opzioni per reti più piccole (es. le ferrovie ASTRAL di Roma, che in OSM sono "light_rail"):
+   * file, bbox, filter, tileDeg, minNodes.
+   */
+  constructor({ dataDir, stations, file = 'rail.bin', pathsFile = 'paths-v2.json', bbox = BBOX, filter = FILTER, tileDeg = TILE_DEG, minNodes = 50_000 }) {
+    this.binFile = path.join(dataDir, file);
+    this.pathsFile = path.join(dataDir, pathsFile);
+    this.bbox = bbox;
+    this.filter = filter;
+    this.tileDeg = tileDeg;
+    this.minNodes = minNodes;
     this.st = stations;
     this.ready = false;
     this.state = 'in attesa';
@@ -77,9 +85,11 @@ export class RailNetwork {
 
   async download() {
     const tiles = [];
-    for (let s = BBOX.s; s < BBOX.n; s += TILE_DEG) {
-      for (let w = BBOX.w; w < BBOX.e; w += TILE_DEG) {
-        tiles.push([s, w, Math.min(s + TILE_DEG, BBOX.n), Math.min(w + TILE_DEG, BBOX.e)]);
+    const B = this.bbox;
+    const T = this.tileDeg;
+    for (let s = B.s; s < B.n; s += T) {
+      for (let w = B.w; w < B.e; w += T) {
+        tiles.push([s, w, Math.min(s + T, B.n), Math.min(w + T, B.e)]);
       }
     }
     log(`Binari: scarico la rete ferroviaria da OpenStreetMap (${tiles.length} tasselli, una tantum)…`);
@@ -141,7 +151,7 @@ export class RailNetwork {
 
     const N = lat.length;
     const E = edges.length / 2;
-    if (N < 50_000) throw new Error(`rete troppo piccola (${N} nodi): download non riuscito`);
+    if (N < this.minNodes) throw new Error(`rete troppo piccola (${N} nodi): download non riuscito`);
     const header = Buffer.alloc(12);
     header.write('RAIL', 0);
     header.writeUInt32LE(N, 4);
@@ -153,7 +163,7 @@ export class RailNetwork {
   }
 
   async fetchTile([s, w, n, e]) {
-    const q = `[out:json][timeout:180];${FILTER}(${s},${w},${n},${e});out skel qt;>;out skel qt;`;
+    const q = `[out:json][timeout:180];${this.filter}(${s},${w},${n},${e});out skel qt;>;out skel qt;`;
     for (let attempt = 0; attempt < 2; attempt++) {
       for (const url of ENDPOINTS) {
         try {

@@ -312,6 +312,8 @@ function departuresHtml(deps) {
       .map((d) => {
         const m = Math.round((d.t - now()) / 60000);
         const txt = m <= 0 ? 'ora' : m < 60 ? `${m}′` : fmtTime(d.t);
+        if (d.cancelled) return `<span class="cancelled" title="Corsa soppressa">${txt}</span>`;
+        if (d.ghost) return `<span class="ghost" title="Doveva essere già partita ma non risulta in viaggio: probabilmente saltata">${txt}</span>`;
         const late = d.live && d.delay > 90 ? ` title="ritardo ${Math.round(d.delay / 60)} min"` : '';
         return `<span class="${d.live ? 'live' : ''}"${late}>${txt}</span>`;
       })
@@ -319,7 +321,11 @@ function departuresHtml(deps) {
     const warn = g[0].alert ? ` <span class="st-alert" title="${esc(g[0].alert)}">⚠</span>` : '';
     return `<li>${chip(g[0])}<span class="hs">${esc(g[0].headsign)}${warn}</span><span class="times">${times}</span></li>`;
   });
-  return `<ul class="deplist">${rows.join('')}</ul><div class="legend-live"><span class="live">verde</span> = in tempo reale</div>`;
+  const extra = [
+    deps.some((d) => d.ghost) ? '<span class="ghost">barrato</span> = non rilevata, probabilmente saltata' : '',
+    deps.some((d) => d.cancelled) ? '<span class="cancelled">rosso barrato</span> = soppressa' : '',
+  ].filter(Boolean);
+  return `<ul class="deplist">${rows.join('')}</ul><div class="legend-live"><span class="live">verde</span> = in tempo reale${extra.length ? ' · ' + extra.join(' · ') : ''}</div>`;
 }
 
 // Tasto destro (o pressione lunga) sulla mappa: scegli partenza o arrivo.
