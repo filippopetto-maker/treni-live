@@ -326,11 +326,14 @@ export class TransitFeeds {
     if (this.metro) {
       for (const f of hit) {
         if (!this.statics.get(f.id)?.ready) continue;
-        try {
-          metro.push(...(await this.metro.vehicles(f.id, bb)));
-        } catch (e) {
+        // Se gli orari della città si stanno ancora caricando non si fa aspettare la mappa:
+        // bus e tram partono subito, la metro compare al giro successivo.
+        const p = this.metro.vehicles(f.id, bb).catch((e) => {
           log(`Metro ${f.id}: ${e.message}`);
-        }
+          return [];
+        });
+        const m = await Promise.race([p, new Promise((r) => setTimeout(() => r(null), 2500))]);
+        if (m) metro.push(...m);
       }
     }
     // Metromare e Roma–Viterbo (ASTRAL): orario + ritardi e soppressioni comunicati da ASTRAL.

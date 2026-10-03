@@ -14,7 +14,15 @@ let metroVehicles = [];
 let metroOn = true;
 
 const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+// Telefono: schermo piccolo o dito come puntatore principale.
+const mobile = window.matchMedia('(max-width: 700px), (pointer: coarse)').matches;
 const map = new maplibregl.Map({
+  // Sui telefoni con schermo 3x si disegna a 2x: 2,25 volte meno pixel, differenza invisibile.
+  pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+  fadeDuration: 0,
+  dragRotate: false,
+  pitchWithRotate: false,
+  touchPitch: false,
   container: 'map',
   style: `https://tiles.openfreemap.org/styles/${dark ? 'dark' : 'positron'}`,
   center: [12.6, 42.1],
@@ -23,7 +31,8 @@ const map = new maplibregl.Map({
   maxBounds: [[2, 33], [24, 50]],
   attributionControl: { compact: true },
 });
-map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+map.touchZoomRotate.disableRotation();
+if (!mobile) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), 'top-right');
 
 let trains = [];
@@ -48,7 +57,7 @@ async function pollTrains() {
     trains = data.trains;
     await loadPaths();
     updateCounts();
-    renderTrains();
+    renderTrains(true);
     refreshStatus();
   } catch (e) {
     $('#status').textContent = 'Server non raggiungibile: è avviato? (node server.js)';
@@ -179,11 +188,22 @@ function clearSelected() {
   drawSelected();
 }
 
+/** Area visibile allargata di metà schermo per lato: i treni appena fuori entrano già pronti. */
+function viewBox() {
+  const b = map.getBounds();
+  const dx = (b.getEast() - b.getWest()) / 2;
+  const dy = (b.getNorth() - b.getSouth()) / 2;
+  return [b.getWest() - dx, b.getSouth() - dy, b.getEast() + dx, b.getNorth() + dy];
+}
+
 function trainFeatures() {
   const now = Date.now() + clockOffset;
   const features = [];
+  const [w, s, e, n] = viewBox();
   for (const t of trains) {
     if (!enabled.has(t.cat)) continue;
+    // Scarto veloce: entrambi gli estremi del tratto fuori dallo stesso lato.
+    if ((t.from[0] < w && t.to[0] < w) || (t.from[0] > e && t.to[0] > e) || (t.from[1] < s && t.to[1] < s) || (t.from[1] > n && t.to[1] > n)) continue;
     features.push({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: position(t, now) },
@@ -193,9 +213,12 @@ function trainFeatures() {
   return { type: 'FeatureCollection', features };
 }
 
-function renderTrains() {
+// Mentre la mappa si muove non si ricalcola niente: è lì che il telefono andava a scatti.
+const busy = () => document.hidden || map.isMoving() || map.isZooming();
+
+function renderTrains(force) {
   const src = map.getSource('trains');
-  if (!src) return;
+  if (!src || (force !== true && busy())) return;
   src.setData(trainFeatures());
   if (selected?.kind === 'train') drawSelected();
   if (followId) {
@@ -232,7 +255,7 @@ async function pollTransit() {
   if ((!transitOn && !metroOn) || map.getZoom() < TRANSIT_MIN_ZOOM) {
     src.setData({ type: 'FeatureCollection', features: [] });
     metroVehicles = [];
-    renderMetro();
+    renderMetro(true);
     renderMetroStatus([]);
     $('#transitCount').textContent = transitOn ? 'zoom' : '–';
     $('#metroCount').textContent = metroOn ? 'zoom' : '–';
@@ -253,7 +276,7 @@ async function pollTransit() {
       })),
     });
     metroVehicles = metroOn ? data.metro || [] : [];
-    renderMetro();
+    renderMetro(true);
     renderMetroStatus(metroOn ? data.metroStatus || [] : []);
     $('#transitCount').textContent = surface.length.toLocaleString('it-IT');
     $('#metroCount').textContent = metroVehicles.length.toLocaleString('it-IT');
@@ -293,9 +316,13 @@ function metroPosition(v, now) {
   return alongPath(leg._p, f);
 }
 
-function renderMetro() {
+let metroShown = 0;
+function renderMetro(force) {
   const src = map.getSource('metro');
-  if (!src) return;
+  if (!src || (force !== true && busy())) return;
+  // Niente metro in vista: non si riscrive la sorgente vuota ogni secondo.
+  if (!metroVehicles.length && !metroShown) return;
+  metroShown = metroVehicles.length;
   const now = Date.now() + clockOffset;
   const features = metroVehicles.map((v) => {
     const pos = metroPosition(v, now);
@@ -445,6 +472,8 @@ function showVehicle(p, lngLat) {
 // ---------- mappa ----------
 
 map.on('load', () => {
+  // Sul telefono la scritta dei crediti parte chiusa (resta il tasto ⓘ).
+  if (mobile) document.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
   // Etichette della mappa in italiano dove disponibili.
   for (const layer of map.getStyle().layers) {
     const tf = layer.type === 'symbol' && map.getLayoutProperty(layer.id, 'text-field');
@@ -572,7 +601,7 @@ map.on('load', () => {
   });
 
   map.on('click', 'metro', (e) => showVehicle(e.features[0].properties, e.features[0].geometry.coordinates));
-  setInterval(renderMetro, 1000);
+  setInterval(renderMetro, mobile ? 2000 : 1000);
   for (const layer of ['trains', 'transit', 'metro']) {
     map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'));
     map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''));
@@ -582,7 +611,15 @@ map.on('load', () => {
     if (t) showTrain(t, e.features[0].geometry.coordinates);
   });
   map.on('click', 'transit', (e) => showVehicle(e.features[0].properties, e.features[0].geometry.coordinates));
-  map.on('moveend', pollTransit);
+  // A fine spostamento: subito i treni nella nuova area, i mezzi urbani dopo una breve pausa
+  // (chi trascina a scatti non fa partire una richiesta per ogni scatto).
+  let moveTimer = null;
+  map.on('moveend', () => {
+    renderTrains(true);
+    renderMetro(true);
+    clearTimeout(moveTimer);
+    moveTimer = setTimeout(pollTransit, 400);
+  });
 
   pollTrains();
   setInterval(pollTrains, TRAIN_POLL_MS);
@@ -593,7 +630,7 @@ map.on('load', () => {
       pollTransit();
     }
   });
-  setInterval(renderTrains, 1000);
+  setInterval(renderTrains, mobile ? 2000 : 1000);
 });
 
 // ---------- controlli ----------
@@ -601,7 +638,7 @@ map.on('load', () => {
 document.querySelectorAll('[data-cat]').forEach((cb) =>
   cb.addEventListener('change', () => {
     cb.checked ? enabled.add(cb.dataset.cat) : enabled.delete(cb.dataset.cat);
-    renderTrains();
+    renderTrains(true);
   })
 );
 $('#transitToggle').addEventListener('change', (e) => {
@@ -612,11 +649,20 @@ $('#metroToggle').addEventListener('change', (e) => {
   metroOn = e.target.checked;
   pollTransit();
 });
-$('#collapse').addEventListener('click', () => {
+function setPanel(open) {
   const p = $('#panel');
-  p.classList.toggle('collapsed');
-  $('#collapse').textContent = p.classList.contains('collapsed') ? '+' : '–';
+  p.classList.toggle('collapsed', !open);
+  $('#collapse').textContent = open ? '–' : '+';
+}
+$('#collapse').addEventListener('click', (e) => {
+  e.stopPropagation();
+  setPanel($('#panel').classList.contains('collapsed'));
 });
+// Sul telefono il pannello è un cassetto: si apre e si chiude toccando l'intestazione.
+if (mobile) {
+  setPanel(false);
+  $('#panel header').addEventListener('click', () => setPanel($('#panel').classList.contains('collapsed')));
+}
 $('#search').addEventListener('submit', (e) => {
   e.preventDefault();
   const q = $('#q').value.trim().toUpperCase().replace(/\s+/g, ' ');
@@ -630,6 +676,10 @@ $('#search').addEventListener('submit', (e) => {
     return;
   }
   const pos = position(t, Date.now() + clockOffset);
+  if (mobile) {
+    $('#q').blur();
+    setPanel(false);
+  }
   map.flyTo({ center: pos, zoom: Math.max(map.getZoom(), 10) });
   showTrain(t, pos);
 });

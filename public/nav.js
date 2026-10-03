@@ -24,14 +24,15 @@ document.querySelectorAll('.tabs button').forEach((b) =>
   b.addEventListener('click', () => {
     document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('hidden', t.id !== b.dataset.tab));
-    if (b.dataset.tab === 'tab-nav') $('#navFrom').focus();
+    setPanel(true);
+    // Sul telefono niente tastiera che si apre da sola: copre metà schermo.
+    if (b.dataset.tab === 'tab-nav' && !mobile) $('#navFrom').focus();
   })
 );
 
 function openNavTab() {
   document.querySelector('.tabs [data-tab="tab-nav"]').click();
-  $('#panel').classList.remove('collapsed');
-  $('#collapse').textContent = '–';
+  setPanel(true);
 }
 
 // ---------- ricerca luoghi ----------
@@ -87,7 +88,10 @@ function setPlace(which, p) {
     el.className = `pin ${which}`;
     nav.markers[which] = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map);
   }
-  if (nav.from && nav.to) plan();
+  if (nav.from && nav.to) {
+    if (mobile) document.activeElement?.blur?.();
+    plan();
+  }
 }
 
 $('#navHere').addEventListener('click', () => {
@@ -242,8 +246,11 @@ function drawJourney(fit) {
   if (fit && j) {
     const b = new maplibregl.LngLatBounds();
     for (const l of j.legs) for (const c of l.coords) b.extend(c);
-    const left = window.innerWidth > 600 ? 360 : 40;
-    map.fitBounds(b, { padding: { top: 60, bottom: 60, left, right: 60 }, maxZoom: 16, duration: 600 });
+    // Telefono: il cassetto copre il fondo dello schermo, il percorso va nella parte libera sopra.
+    const pad = mobile
+      ? { top: 50, bottom: Math.min($('#panel').offsetHeight, window.innerHeight * 0.65) + 20, left: 30, right: 30 }
+      : { top: 60, bottom: 60, left: window.innerWidth > 600 ? 360 : 40, right: 60 };
+    map.fitBounds(b, { padding: pad, maxZoom: 16, duration: 600 });
   }
 }
 
@@ -328,8 +335,25 @@ function departuresHtml(deps) {
   return `<ul class="deplist">${rows.join('')}</ul><div class="legend-live"><span class="live">verde</span> = in tempo reale${extra.length ? ' · ' + extra.join(' · ') : ''}</div>`;
 }
 
-// Tasto destro (o pressione lunga) sulla mappa: scegli partenza o arrivo.
+// Tasto destro (o pressione lunga col dito) sulla mappa: scegli partenza o arrivo.
+// Su iPhone il browser non genera il tasto destro: la pressione lunga la si riconosce a mano.
+let pressTimer = null;
+let pressAt = null;
+map.on('touchstart', (e) => {
+  clearTimeout(pressTimer);
+  if (e.originalEvent.touches.length !== 1) return;
+  pressAt = e.point;
+  pressTimer = setTimeout(() => pickPoint(e), 550);
+});
+map.on('touchmove', (e) => {
+  if (pressAt && (Math.abs(e.point.x - pressAt.x) > 8 || Math.abs(e.point.y - pressAt.y) > 8)) clearTimeout(pressTimer);
+});
+for (const ev of ['touchend', 'touchcancel', 'movestart']) map.on(ev, () => clearTimeout(pressTimer));
 map.on('contextmenu', (e) => {
+  clearTimeout(pressTimer);
+  pickPoint(e);
+});
+function pickPoint(e) {
   openPopup?.remove();
   const p = { lat: e.lngLat.lat, lon: e.lngLat.lng, name: `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}` };
   openPopup = new maplibregl.Popup({ offset: 4 })
@@ -344,7 +368,7 @@ map.on('contextmenu', (e) => {
       pop.remove();
     })
   );
-});
+}
 
 // ---------- livelli sulla mappa ----------
 

@@ -254,3 +254,44 @@ html, body { margin: 0; height: 100%; }
 /* Corse saltate / soppresse nelle partenze */
 .deplist .ghost, .legend-live .ghost { color: var(--muted); text-decoration: line-through; font-weight: 400; }
 .deplist .cancelled, .legend-live .cancelled { color: var(--bad); text-decoration: line-through; }
+
+/* ---------- Telefono ---------- */
+/* Pannello a cassetto dal basso, mappa libera sopra; niente sfocatura (sul telefono
+   costa un ridisegno a ogni fotogramma della mappa); campi a 16px (iOS non zooma). */
+@media (max-width: 700px) {
+  #panel {
+    top: auto; left: 0; right: 0; bottom: 0; width: auto !important; max-width: none;
+    max-height: 62vh; max-height: 62dvh; border-radius: 16px 16px 0 0;
+    backdrop-filter: none; background: var(--solid, #fff);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.18);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #panel header { padding: 6px 14px 4px; cursor: pointer; position: relative; }
+  #panel header::before {
+    content: ''; position: absolute; top: 5px; left: 50%; width: 38px; height: 4px; margin-left: -19px;
+    border-radius: 2px; background: var(--line);
+  }
+  #panel h1 { font-size: 15px; padding-top: 6px; }
+  #collapse { font-size: 24px; padding: 4px 8px; }
+  #panel.collapsed .tabs { display: flex; }
+  .tabs { padding-bottom: 10px; }
+  .tabs button { padding: 9px 4px; font-size: 14px; }
+  #panel .body { padding-bottom: 14px; }
+  #q, .place input, .when select, .when input { font-size: 16px; padding: 9px 10px; }
+  .place button, .when button { padding: 9px 11px; font-size: 16px; }
+  .filters label { padding: 6px 0; }
+  .sugg li { padding: 10px 9px; }
+  .sugg { left: 0; max-height: 40vh; overflow-y: auto; }
+  .jr { padding: 10px 12px; }
+
+  #ticker { top: 8px; bottom: auto; left: 8px; right: 8px; width: auto; height: 30px; font-size: 12px; }
+  .tk-view { mask-image: none; }
+  .tk-track { will-change: transform; }
+  .maplibregl-ctrl-top-right { top: 40px; }
+  .maplibregl-ctrl-bottom-right { bottom: 96px; }
+  .maplibregl-popup-content { min-width: 0; max-width: 88vw; }
+  .deplist { max-height: 34vh; }
+}
+@media (max-width: 700px) and (prefers-color-scheme: dark) {
+  #panel { --solid: #181b22; }
+}

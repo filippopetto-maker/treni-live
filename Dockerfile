@@ -13,10 +13,12 @@ COPY --chown=node:node . .
 RUN mkdir -p data \
  && for f in seed/*.gz; do gunzip -c "$f" > "data/$(basename "$f" .gz)"; done \
  && cp seed/*.json data/ \
+ && node deploy/prebuild.mjs \
  && chown -R node:node /app
 
 USER node
-# PORT lo imposta l'hosting (Render usa 10000). Con 512 MB di RAM il navigatore tiene una città alla volta.
-ENV HOST=0.0.0.0 PORT=8787 TZ=Europe/Rome NAV_MAX_NETS=1 NAV_UNLOAD_MIN=10 NODE_OPTIONS="--max-old-space-size=280 --expose-gc"
+# PORT lo imposta l'hosting (Render usa 10000). Con 512 MB di RAM il navigatore tiene una città alla volta;
+# la tiene in memoria 3 ore (ricaricarla su 0,1 CPU costa decine di secondi).
+ENV HOST=0.0.0.0 PORT=8787 TZ=Europe/Rome NAV_MAX_NETS=1 NAV_UNLOAD_MIN=180 GTFS_MAX_AGE_DAYS=21 NODE_OPTIONS="--max-old-space-size=280 --expose-gc"
 EXPOSE 8787
 CMD ["node", "server.js"]

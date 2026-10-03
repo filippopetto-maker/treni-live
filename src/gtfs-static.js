@@ -15,7 +15,8 @@ import { modeOf } from './planner/gtfs-net.js';
 
 const run = promisify(execFile);
 const FILOBUS = { roma: new Set(['60', '74', '90']), milano: new Set(['90', '91', '92', '93']) };
-const MAX_AGE = 7 * 24 * 3600 * 1000;
+// Su Render gli orari arrivano già pronti con ogni nuova versione (GTFS_MAX_AGE_DAYS più alto).
+const MAX_AGE = (Number(process.env.GTFS_MAX_AGE_DAYS) || 7) * 24 * 3600 * 1000;
 
 export class GtfsStatic {
   constructor({ dataDir, feed }) {
