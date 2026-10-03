@@ -230,57 +230,62 @@ export class GtfsNetwork {
       (c[i.exception_type] === '1' ? s.add : s.rem).push(c[i.date]);
     });
 
-    // Orari: righe raggruppate per corsa e ordinate per stop_sequence
+    // Orari in due passate, per stare dentro server da 512 MB:
+    //  1) si contano le fermate di ogni corsa → posizione di ogni corsa negli array finali;
+    //  2) ogni riga va direttamente al suo posto. Poi si ordina per stop_sequence solo se serve.
+    const file = path.join(tmp, 'stop_times.txt');
     const tripIndex = new Map();
     const trips = [];
-    // Righe contate in anticipo: array della misura giusta, niente raddoppi (picco di memoria più basso).
-    let cap = (await countLines(path.join(tmp, 'stop_times.txt'))) + 16;
-    let tr = new Int32Array(cap), sq = new Int32Array(cap), sp = new Int32Array(cap), ar = new Int32Array(cap), dp = new Int32Array(cap);
-    let n = 0;
-    const grow = () => {
-      cap *= 2;
-      const g = (a) => {
-        const b = new Int32Array(cap);
-        b.set(a);
-        return b;
-      };
-      tr = g(tr); sq = g(sq); sp = g(sp); ar = g(ar); dp = g(dp);
-    };
-    await eachRow(path.join(tmp, 'stop_times.txt'), (c, i) => {
-      const s = stopIndex.get(c[i.stop_id]);
-      if (s === undefined) return;
+    let counts = new Int32Array(1 << 16);
+    await eachRow(file, (c, i) => {
+      if (stopIndex.get(c[i.stop_id]) === undefined) return;
       let t = tripIndex.get(c[i.trip_id]);
       if (t === undefined) {
         t = trips.length;
-        tripIndex.set(c[i.trip_id], t);
-        trips.push(c[i.trip_id]);
+        const id = Buffer.from(c[i.trip_id], 'utf8').toString('utf8'); // stringa propria, non legata alla riga
+        tripIndex.set(id, t);
+        trips.push(id);
+        if (t >= counts.length) {
+          const b = new Int32Array(counts.length * 2);
+          b.set(counts);
+          counts = b;
+        }
       }
-      if (n === cap) grow();
-      const a = hms(c[i.arrival_time]);
-      const d = hms(c[i.departure_time]);
-      tr[n] = t;
-      sq[n] = +c[i.stop_sequence];
-      sp[n] = s;
-      ar[n] = a >= 0 ? a : d;
-      dp[n] = d >= 0 ? d : a;
-      n++;
+      counts[t]++;
     });
     const nT = trips.length;
     const tripOff = new Int32Array(nT + 1);
-    for (let k = 0; k < n; k++) tripOff[tr[k] + 1]++;
-    for (let t = 0; t < nT; t++) tripOff[t + 1] += tripOff[t];
+    for (let t = 0; t < nT; t++) tripOff[t + 1] = tripOff[t] + counts[t];
+    counts = null;
+    const n = tripOff[nT];
     const fill = tripOff.slice(0, nT);
-    const order = new Int32Array(n);
-    for (let k = 0; k < n; k++) order[fill[tr[k]]++] = k;
-    const stIdx = new Int32Array(n), stArr = new Int32Array(n), stDep = new Int32Array(n);
+    const stIdx = new Int32Array(n), stArr = new Int32Array(n), stDep = new Int32Array(n), seq = new Int32Array(n);
+    await eachRow(file, (c, i) => {
+      const s = stopIndex.get(c[i.stop_id]);
+      if (s === undefined) return;
+      const t = tripIndex.get(c[i.trip_id]);
+      const o = fill[t]++;
+      const a = hms(c[i.arrival_time]);
+      const d = hms(c[i.departure_time]);
+      stIdx[o] = s;
+      stArr[o] = a >= 0 ? a : d;
+      stDep[o] = d >= 0 ? d : a;
+      seq[o] = +c[i.stop_sequence];
+    });
     for (let t = 0; t < nT; t++) {
-      const rows = Array.from(order.subarray(tripOff[t], tripOff[t + 1])).sort((x, y) => sq[x] - sq[y]);
-      rows.forEach((k, j) => {
-        const o = tripOff[t] + j;
-        stIdx[o] = sp[k];
-        stArr[o] = ar[k];
-        stDep[o] = dp[k];
-      });
+      const a = tripOff[t];
+      const b = tripOff[t + 1];
+      let sorted = true;
+      for (let k = a + 1; k < b && sorted; k++) if (seq[k] < seq[k - 1]) sorted = false;
+      if (sorted) continue;
+      const idx = Array.from({ length: b - a }, (_, k) => a + k).sort((x, y) => seq[x] - seq[y]);
+      const cp = (arr) => {
+        const v = idx.map((k) => arr[k]);
+        v.forEach((x, k) => (arr[a + k] = x));
+      };
+      cp(stIdx);
+      cp(stArr);
+      cp(stDep);
     }
 
     const header = Buffer.alloc(12);
