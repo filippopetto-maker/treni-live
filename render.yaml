@@ -1,0 +1,11 @@
+# Configurazione per Render (piano gratuito, nessuna carta richiesta).
+services:
+  - type: web
+    name: treni-live
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /healthz
+    envVars:
+      - key: TRENI_PASSWORD
+        sync: false # la scegli tu nella pagina di Render

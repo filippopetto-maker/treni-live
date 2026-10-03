@@ -13,7 +13,9 @@ const ACCESS_MAX_M = 1500;
 const RAIL_ACCESS_M = 1500;
 const CROSS_M = 400;
 const WALK_ONLY_MAX_M = 2500;
-const UNLOAD_AFTER = 30 * 60_000;
+// Su server piccoli (es. 512 MB): NAV_UNLOAD_MIN=10 e NAV_MAX_NETS=1 tengono in memoria una città alla volta.
+const UNLOAD_AFTER = (Number(process.env.NAV_UNLOAD_MIN) || 30) * 60_000;
+const MAX_NETS = Number(process.env.NAV_MAX_NETS) || 0;
 const TZ = 'Europe/Rome';
 
 // Colori ufficiali delle metropolitane (i GTFS di Roma e Milano non li indicano).
@@ -65,7 +67,7 @@ export class Planner {
     this.crossCache = new Map();
     setInterval(() => {
       for (const n of this.nets.values()) if (n.loaded && Date.now() - n.lastUse > UNLOAD_AFTER) n.unload();
-    }, 5 * 60_000).unref();
+    }, 60_000).unref();
   }
 
   /** Feed urbani con orari statici (quelli dove il navigatore funziona). */
@@ -90,6 +92,10 @@ export class Planner {
     const n = this.net(id);
     if (!n) return null;
     if (!n.statics.ready) throw new Error(`orari di ${n.feed.name} ancora in preparazione, riprova tra poco`);
+    if (MAX_NETS && !n.loaded) {
+      const others = [...this.nets.values()].filter((x) => x !== n && x.loaded).sort((a, b) => a.lastUse - b.lastUse);
+      while (others.length >= MAX_NETS) others.shift().unload();
+    }
     await n.load();
     return n;
   }

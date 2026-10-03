@@ -68,6 +68,12 @@ function splitCsv(line) {
   return out;
 }
 
+async function countLines(file) {
+  let n = 0;
+  for await (const chunk of createReadStream(file)) for (let i = 0; i < chunk.length; i++) if (chunk[i] === 10) n++;
+  return n;
+}
+
 async function eachRow(file, onRow) {
   const rl = readline.createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity });
   let idx = null;
@@ -129,7 +135,11 @@ export class GtfsNetwork {
       const buf = await fs.readFile(path.join(this.dir, 'net.bin'));
       const nT = buf.readUInt32LE(4);
       const nR = buf.readUInt32LE(8);
-      const arr = (off, n) => new Int32Array(buf.buffer.slice(buf.byteOffset + off, buf.byteOffset + off + n * 4));
+      // Viste sul file letto, senza copiarlo (i blocchi sono allineati a 4 byte).
+      const arr = (off, n) =>
+        (buf.byteOffset + off) % 4 === 0
+          ? new Int32Array(buf.buffer, buf.byteOffset + off, n)
+          : new Int32Array(buf.buffer.slice(buf.byteOffset + off, buf.byteOffset + off + n * 4));
       let o = 12;
       this.tripOff = arr(o, nT + 1);
       o += (nT + 1) * 4;
@@ -161,7 +171,9 @@ export class GtfsNetwork {
     this.tripOff = this.stIdx = this.stArr = this.stDep = null;
     this.tripIds = this.tripIndex = this.tripService = this.tripDelay = this.tripLive = this.lastTu = null;
     this.dates.clear();
-    log(`Navigatore: rete ${this.id} tolta dalla memoria (inutilizzata)`);
+    // Su server piccoli libera subito la memoria (serve node --expose-gc).
+    globalThis.gc?.();
+    log(`Navigatore: rete ${this.id} tolta dalla memoria`);
   }
 
   async ensureCache() {
@@ -173,6 +185,7 @@ export class GtfsNetwork {
       if (meta.version === CACHE_VERSION && meta.zipMtime === zipStat.mtimeMs) return;
     } catch {}
     await this.buildCache(zip, zipStat.mtimeMs);
+    globalThis.gc?.(); // libera gli array di lavoro prima di caricare la cache
   }
 
   async buildCache(zip, zipMtime) {
@@ -216,7 +229,8 @@ export class GtfsNetwork {
     // Orari: righe raggruppate per corsa e ordinate per stop_sequence
     const tripIndex = new Map();
     const trips = [];
-    let cap = 1 << 22;
+    // Righe contate in anticipo: array della misura giusta, niente raddoppi (picco di memoria più basso).
+    let cap = (await countLines(path.join(tmp, 'stop_times.txt'))) + 16;
     let tr = new Int32Array(cap), sq = new Int32Array(cap), sp = new Int32Array(cap), ar = new Int32Array(cap), dp = new Int32Array(cap);
     let n = 0;
     const grow = () => {
@@ -269,10 +283,14 @@ export class GtfsNetwork {
     header.write('GNET', 0);
     header.writeUInt32LE(nT, 4);
     header.writeUInt32LE(n, 8);
-    await fs.writeFile(
-      path.join(this.dir, 'net.bin'),
-      Buffer.concat([header, ...[tripOff, stIdx, stArr, stDep].map((a) => Buffer.from(a.buffer, a.byteOffset, a.byteLength))])
-    );
+    // Scrittura a blocchi: niente copia unica da ~80 MB in memoria.
+    const fh = await fs.open(path.join(this.dir, 'net.bin'), 'w');
+    try {
+      await fh.write(header);
+      for (const a of [tripOff, stIdx, stArr, stDep]) await fh.write(Buffer.from(a.buffer, a.byteOffset, a.byteLength));
+    } finally {
+      await fh.close();
+    }
     await fs.writeFile(path.join(this.dir, 'stops.json'), JSON.stringify(stops));
     await fs.writeFile(path.join(this.dir, 'net.json'), JSON.stringify({ trips, calendar, calDates }));
     await fs.writeFile(path.join(this.dir, 'net-info.json'), JSON.stringify({ version: CACHE_VERSION, zipMtime }));

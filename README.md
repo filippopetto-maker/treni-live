@@ -139,3 +139,12 @@ oppure tasto destro sulla mappa → "Parti da qui" / "Arriva qui".
 - Al primo uso gli orari vengono convertiti in una cache binaria (`data/gtfs/<città>/net.bin`, ~10 s);
   la rete resta in memoria solo mentre la usi (si libera dopo 30 min di inattività).
 - Ricerca indirizzi: Photon (OpenStreetMap).
+
+## Online gratis su Render (senza carta di credito)
+
+- Il repository contiene `Dockerfile`, `render.yaml` e la cartella `seed/` (dati pesanti già pronti e compressi).
+- Su render.com: accesso con GitHub → **New → Blueprint** → questo repository → imposta `TRENI_PASSWORD` → Deploy.
+- Il piano gratuito ha 512 MB di RAM: il navigatore tiene in memoria una città alla volta (`NAV_MAX_NETS=1`).
+- Il servizio gratuito si addormenta dopo 15 minuti senza visite: un controllo ogni 5 minuti su `/healthz`
+  (es. UptimeRobot, gratuito) lo tiene sveglio; senza visitatori il server resta in modalità risparmio.
+- Aggiornare i dati in `seed/`: `zsh deploy/aggiorna-seed.sh`, poi commit e push.

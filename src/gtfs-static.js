@@ -67,9 +67,18 @@ export class GtfsStatic {
         type: r.route_type,
       });
     });
+    // I pezzi ottenuti con split() tengono in vita l'intera riga del CSV: a Milano erano ~150 MB.
+    // Valori ripetuti (linea, forma, destinazione, servizio) condivisi, id copiati in stringhe proprie.
+    const pool = new Map();
+    const intern = (s) => {
+      if (!s) return '';
+      let v = pool.get(s);
+      if (v === undefined) pool.set(s, (v = own(s)));
+      return v;
+    };
     await readCsv(path.join(this.dir, 'trips.txt'), (r) => {
       // [linea, forma, destinazione, servizio (calendario)]
-      this.trips.set(r.trip_id, [r.route_id, r.shape_id, r.trip_headsign || '', r.service_id]);
+      this.trips.set(own(r.trip_id), [intern(r.route_id), intern(r.shape_id), intern(r.trip_headsign || ''), intern(r.service_id)]);
     });
     const tmp = new Map();
     await readCsv(path.join(this.dir, 'shapes.txt'), (r) => {
@@ -115,6 +124,9 @@ export class GtfsStatic {
     return { coords: this.cache.get(inf.shape), rname: inf.rname, dest: inf.dest, rcolor: inf.rcolor };
   }
 }
+
+/** Copia di una stringa che non dipende dalla riga da cui è stata ritagliata. */
+const own = (s) => Buffer.from(s, 'utf8').toString('utf8');
 
 async function readCsv(file, onRow) {
   const rl = readline.createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity });

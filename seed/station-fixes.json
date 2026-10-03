@@ -1,0 +1,394 @@
+[
+ {
+  "code": "S19919",
+  "name": "STABIO",
+  "osm": "Stabio",
+  "km": 1.4,
+  "from": [
+   45.862300929877,
+   8.9420283645506
+  ],
+  "to": [
+   45.8497841,
+   8.9444952
+  ]
+ },
+ {
+  "code": "S01111",
+  "name": "COLMEGNA",
+  "osm": "Colmegna",
+  "km": 1.5,
+  "from": [
+   46.032643874176,
+   8.737316808655
+  ],
+  "to": [
+   46.0247375,
+   8.752129
+  ]
+ },
+ {
+  "code": "S01110",
+  "name": "PINO TRONZANO",
+  "osm": "Pino-Tronzano",
+  "km": 2.2,
+  "from": [
+   46.09558245598,
+   8.7111445204292
+  ],
+  "to": [
+   46.0987125,
+   8.7368855
+  ]
+ },
+ {
+  "code": "S01308",
+  "name": "COMO CAMERLATA",
+  "osm": "Como Camerlata",
+  "km": 1.2,
+  "from": [
+   45.793888634834,
+   9.071410816221
+  ],
+  "to": [
+   45.7845739,
+   9.0794108
+  ]
+ },
+ {
+  "code": "S01649",
+  "name": "MILANO PORTA VENEZIA",
+  "osm": "Milano Porta Venezia",
+  "km": 0.8,
+  "from": [
+   45.471121,
+   9.201889
+  ],
+  "to": [
+   45.475875,
+   9.2085026
+  ]
+ },
+ {
+  "code": "S04523",
+  "name": "IMPERIA",
+  "osm": "Imperia",
+  "km": 2.1,
+  "from": [
+   43.88051,
+   8.019182
+  ],
+  "to": [
+   43.8971753,
+   8.0312268
+  ]
+ },
+ {
+  "code": "S04524",
+  "name": "DIANO",
+  "osm": "Diano",
+  "km": 1.1,
+  "from": [
+   43.916395509856,
+   8.0783036263974
+  ],
+  "to": [
+   43.9252511,
+   8.0731492
+  ]
+ },
+ {
+  "code": "S04525",
+  "name": "ANDORA",
+  "osm": "Andora",
+  "km": 0.9,
+  "from": [
+   43.961799283719,
+   8.1274611204309
+  ],
+  "to": [
+   43.9600479,
+   8.138332
+  ]
+ },
+ {
+  "code": "S00075",
+  "name": "AGOGNATE",
+  "osm": "Agognate",
+  "km": 2.1,
+  "from": [
+   45.465138728725,
+   8.6034537384703
+  ],
+  "to": [
+   45.4722662,
+   8.5795412
+  ]
+ },
+ {
+  "code": "S05386",
+  "name": "ANZOLA DELL'EMILIA",
+  "osm": "Anzola dell’Emilia",
+  "km": 1,
+  "from": [
+   44.542245701088,
+   11.195379444623
+  ],
+  "to": [
+   44.5509367,
+   11.1966102
+  ]
+ },
+ {
+  "code": "S05134",
+  "name": "S.BENEDETTO SAMBRO-CASTIGLIONE PEPOLI",
+  "osm": "San Benedetto Sambro-Castiglione Pepoli",
+  "km": 1.4,
+  "from": [
+   44.22866,
+   11.19226
+  ],
+  "to": [
+   44.2162142,
+   11.1896065
+  ]
+ },
+ {
+  "code": "S05254",
+  "name": "REGGIO EMILIA AV MEDIOPADANA",
+  "osm": "Reggio Emilia AV Mediopadana",
+  "km": 9.6,
+  "from": [
+   44.779886,
+   10.744171
+  ],
+  "to": [
+   44.7243581,
+   10.6550742
+  ]
+ },
+ {
+  "code": "S07505",
+  "name": "POTENZA PICENA MONTELUPONE",
+  "osm": "Potenza Picena-Montelupone",
+  "km": 8.8,
+  "from": [
+   43.36991,
+   13.59265
+  ],
+  "to": [
+   43.3603351,
+   13.6980367
+  ]
+ },
+ {
+  "code": "S06952",
+  "name": "PIAN DEL MUGNONE",
+  "osm": "Pian del Mugnone",
+  "km": 2.5,
+  "from": [
+   43.813899,
+   11.265994
+  ],
+  "to": [
+   43.8176841,
+   11.2952467
+  ]
+ },
+ {
+  "code": "S06953",
+  "name": "FIESOLE CALDINE",
+  "osm": "Fiesole - Caldine",
+  "km": 3.5,
+  "from": [
+   43.833697,
+   11.266047
+  ],
+  "to": [
+   43.8304136,
+   11.3079009
+  ]
+ },
+ {
+  "code": "S06013",
+  "name": "AULLA LUNIGIANA",
+  "osm": "Aulla Lunigiana",
+  "km": 1.1,
+  "from": [
+   44.210555,
+   9.970015
+  ],
+  "to": [
+   44.2188969,
+   9.9767629
+  ]
+ },
+ {
+  "code": "S12042",
+  "name": "MILAZZO",
+  "osm": "Milazzo",
+  "km": 1.9,
+  "from": [
+   38.21195,
+   15.244203
+  ],
+  "to": [
+   38.1978395,
+   15.2577691
+  ]
+ },
+ {
+  "code": "S12041",
+  "name": "BARCELLONA-CASTROREALE",
+  "osm": "Barcellona-Castroreale",
+  "km": 1.2,
+  "from": [
+   38.14918,
+   15.212499
+  ],
+  "to": [
+   38.154176,
+   15.1998658
+  ]
+ },
+ {
+  "code": "S09704",
+  "name": "CASTEL S.GIORGIO ROCCAPIEMONTE",
+  "osm": "Castel San Giorgio-Roccapiemonte",
+  "km": 1.4,
+  "from": [
+   40.758713,
+   14.692352
+  ],
+  "to": [
+   40.7714597,
+   14.6950638
+  ]
+ },
+ {
+  "code": "S11709",
+  "name": "VALLO DELLA LUCANIA-CASTELNUOVO",
+  "osm": "Vallo della Lucania-Castelnuovo",
+  "km": 9,
+  "from": [
+   40.233316,
+   15.266511
+  ],
+  "to": [
+   40.2295321,
+   15.1582422
+  ]
+ },
+ {
+  "code": "S09215",
+  "name": "ACERRA",
+  "osm": "Acerra",
+  "km": 1.3,
+  "from": [
+   40.939066,
+   14.372243
+  ],
+  "to": [
+   40.9473906,
+   14.3825516
+  ]
+ },
+ {
+  "code": "S09315",
+  "name": "MONTECALVO-BUONALBERGO-CASALBORE",
+  "osm": "Montecalvo-Buonalbergo-Casalbore",
+  "km": 4,
+  "from": [
+   41.2211,
+   14.9795
+  ],
+  "to": [
+   41.2154428,
+   15.0275449
+  ]
+ },
+ {
+  "code": "S09751",
+  "name": "OTTAVIANO",
+  "osm": "Ottaviano",
+  "km": 1.1,
+  "from": [
+   40.85256,
+   14.493479
+  ],
+  "to": [
+   40.8529512,
+   14.4807878
+  ]
+ },
+ {
+  "code": "S09750",
+  "name": "MARIGLIANO",
+  "osm": "Marigliano",
+  "km": 0.8,
+  "from": [
+   40.923733,
+   14.460435
+  ],
+  "to": [
+   40.9169349,
+   14.4563433
+  ]
+ },
+ {
+  "code": "S09999",
+  "name": "PIEDIMONTE MATESE",
+  "osm": "Piedimonte Matese",
+  "km": 33.3,
+  "from": [
+   41.062399461951,
+   14.25354943148
+  ],
+  "to": [
+   41.3510745,
+   14.36795
+  ]
+ },
+ {
+  "code": "S07026",
+  "name": "NEPEZZANO-PIANO D'ACCIO",
+  "osm": "Nepezzano-Piano d’Accio",
+  "km": 5.9,
+  "from": [
+   42.735378364252,
+   13.75882288089
+  ],
+  "to": [
+   42.6820407,
+   13.755527
+  ]
+ },
+ {
+  "code": "S12882",
+  "name": "S.GAVINO",
+  "osm": "San Gavino",
+  "km": 1.7,
+  "from": [
+   39.546206,
+   8.788017
+  ],
+  "to": [
+   39.5577709,
+   8.8007374
+  ]
+ },
+ {
+  "code": "S12819",
+  "name": "ELMAS AEROPORTO",
+  "osm": "Elmas Aeroporto",
+  "km": 3.4,
+  "from": [
+   39.239904567828,
+   9.0289691906669
+  ],
+  "to": [
+   39.2571892,
+   9.0629124
+  ]
+ }
+]

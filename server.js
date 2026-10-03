@@ -99,6 +99,11 @@ function findTrain(id) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  // Controllo di salute per l'hosting e per il "tienilo sveglio": niente password, nessun dato.
+  if (url.pathname === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    return res.end('ok');
+  }
   if (!authorized(req)) {
     res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Treni Live", charset="UTF-8"', 'Content-Type': 'text/plain' });
     return res.end('Password richiesta');
@@ -130,6 +135,7 @@ const server = http.createServer(async (req, res) => {
         modalita: activity.mode,
         viaggiatreno: vt.stats(),
         italo: italo.stats(),
+        memoriaMB: Object.fromEntries(Object.entries(process.memoryUsage()).map(([k, v]) => [k, Math.round(v / 1e6)])),
         binari: rail.stats(),
         corseFantasma: Object.fromEntries([...(planner.ghostCache || new Map())].map(([k, v]) => [k, v.set.size])),
         feeds: transit.list(),
