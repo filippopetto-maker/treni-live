@@ -14,6 +14,7 @@ import { TransitFeeds } from './src/transit.js';
 import { RailNetwork } from './src/rail.js';
 import { trainRoute } from './src/routes.js';
 import { Planner } from './src/planner/index.js';
+import { fixStations } from './src/station-fix.js';
 import { log, activity } from './src/util.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -33,6 +34,12 @@ const transit = new TransitFeeds(path.join(ROOT, 'feeds.json'), path.join(ROOT, 
 await transit.load();
 const planner = new Planner({ dataDir: path.join(ROOT, 'data'), transit, stations, trackers: [vt, italo], rail });
 rail.start();
+// Appena i binari sono pronti, corregge le stazioni con coordinate sbagliate (lontane dai binari).
+const railWait = setInterval(() => {
+  if (!rail.ready) return;
+  clearInterval(railWait);
+  fixStations({ dataDir: path.join(ROOT, 'data'), stations, rail }).catch((e) => log('Stazioni: correzione non riuscita:', e.message));
+}, 2000);
 vt.start();
 italo.start();
 
