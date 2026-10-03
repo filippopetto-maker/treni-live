@@ -233,6 +233,7 @@ async function pollTransit() {
     src.setData({ type: 'FeatureCollection', features: [] });
     metroVehicles = [];
     renderMetro();
+    renderMetroStatus([]);
     $('#transitCount').textContent = transitOn ? 'zoom' : '–';
     $('#metroCount').textContent = metroOn ? 'zoom' : '–';
     $('#hint').textContent = '';
@@ -253,6 +254,7 @@ async function pollTransit() {
     });
     metroVehicles = metroOn ? data.metro || [] : [];
     renderMetro();
+    renderMetroStatus(metroOn ? data.metroStatus || [] : []);
     $('#transitCount').textContent = surface.length.toLocaleString('it-IT');
     $('#metroCount').textContent = metroVehicles.length.toLocaleString('it-IT');
     if (selected?.kind === 'vehicle') {
@@ -304,11 +306,40 @@ function renderMetro() {
     return {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: pos },
-      properties: { id: v.id, feed: v.feed, trip: v.trip, route: v.route, rname: v.rname, dest: v.dest, color: v.color, mode: 'metro', next: v.next, scheduled: true },
+      properties: { id: v.id, feed: v.feed, trip: v.trip, route: v.route, rname: v.rname, dest: v.dest, color: v.color, mode: 'metro', next: v.next, scheduled: true, alert: v.alert?.level || 'ok', alertText: v.alert?.text || '' },
     };
   });
   src.setData({ type: 'FeatureCollection', features });
   if (selected?.kind === 'vehicle' && selected.id?.startsWith('m:')) drawSelected();
+}
+
+// Stato delle linee (ATM per Milano, Roma Mobilità per Roma).
+const LINE_COLORS = {
+  A: '#f7931d', B: '#0a5db4', B1: '#0a5db4', C: '#2fa84f',
+  M1: '#e2231a', M2: '#00a650', M3: '#f9a800', M4: '#0072bc', M5: '#8c4fa3',
+};
+const LEVEL_TEXT = { ok: 'regolare', warn: 'rallentata', station: 'stazione chiusa', stop: 'interrotta', info: 'avviso' };
+let metroStatusByLine = {};
+
+function renderMetroStatus(list) {
+  const el = $('#metroStatus');
+  metroStatusByLine = {};
+  if (!list.length) return (el.innerHTML = '');
+  const rows = [];
+  const chips = [];
+  for (const city of list) {
+    for (const [line, st] of Object.entries(city.lines)) {
+      metroStatusByLine[`${city.feed}/${line}`] = st;
+      chips.push(`<span class="mchip lvl-${st.level}" style="--c:${LINE_COLORS[line] || '#888'}" title="${esc(st.text)}">${esc(line)}</span>`);
+      if (st.level !== 'ok') rows.push(`<li class="lvl-${st.level}"><b>${esc(line)}</b> ${esc(st.text)}</li>`);
+    }
+    if (city.message) rows.push(`<li class="lvl-info">${esc(city.message)}</li>`);
+    if (city.error) rows.push(`<li class="lvl-info">Stato linee di ${esc(city.feed)} non disponibile (${esc(city.error)})</li>`);
+  }
+  const src = list.map((c) => (c.feed === 'milano' ? 'ATM' : 'Roma Mobilità')).join(' e ');
+  el.innerHTML = `<div class="mhead">Stato metro <small>(fonte ${src})</small></div>
+    <div class="mchips">${chips.join('')}</div>
+    ${rows.length ? `<ul class="malerts">${rows.join('')}</ul>` : '<div class="muted">Tutte le linee regolari.</div>'}`;
 }
 
 // ---------- popup ----------
@@ -380,7 +411,8 @@ function showVehicle(p, lngLat) {
   const body =
     mode === 'metro'
       ? `<dt>Prossima</dt><dd>${esc(p.next || '')}</dd>
-         <dt>Posizione</dt><dd>stimata dall'orario <small>(la metro non trasmette la posizione)</small></dd>`
+         <dt>Linea</dt><dd class="${p.alert && p.alert !== 'ok' ? 'warnline' : ''}">${esc(p.alertText || (metroStatusByLine[`${p.feed}/${p.rname}`] ? 'regolare (nessun avviso in corso)' : 'stato non disponibile'))}</dd>
+         <dt>Posizione</dt><dd>stimata dall'orario <small>(la metro non trasmette la posizione; le tratte dichiarate ferme vengono tolte)</small></dd>`
       : `<dt>Vettura</dt><dd>${esc(p.vlabel || p.vid || p.id)}</dd>
          ${p.speed ? `<dt>Velocità</dt><dd>${p.speed} km/h</dd>` : ''}
          ${age !== null ? `<dt>Posizione</dt><dd>${age <= 0 ? 'adesso' : `${age} min fa`}</dd>` : ''}`;
@@ -477,6 +509,16 @@ map.on('load', () => {
 
   // Metro (posizione stimata dagli orari): pallino più grande col colore della linea.
   map.addSource('metro', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  // Anello scuro attorno ai treni della metro: non si confondono con i bus (la A di Roma è arancione).
+  map.addLayer({
+    id: 'metro-halo',
+    type: 'circle',
+    source: 'metro',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 6.5, 15, 12.5],
+      'circle-color': dark ? '#eef0f4' : '#1d2330',
+    },
+  });
   map.addLayer({
     id: 'metro',
     type: 'circle',
@@ -484,7 +526,8 @@ map.on('load', () => {
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4.5, 15, 9],
       'circle-color': ['get', 'color'],
-      'circle-stroke-color': '#fff',
+      // Bordo giallo se la linea ha problemi segnalati (rallentamenti, stazioni chiuse, tratte ferme).
+      'circle-stroke-color': ['match', ['get', 'alert'], 'ok', '#fff', 'info', '#fff', '#f0a202'],
       'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 15, 2.2],
     },
   });

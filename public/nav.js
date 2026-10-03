@@ -11,7 +11,7 @@ const chip = (l) =>
   `<span class="chip" style="background:${esc(l.color || '#666')}">${ICONS[l.mode] || '🚌'} ${esc(l.line)}</span>`;
 
 function liveText(l) {
-  if (!l.live || l.delay == null) return '<span class="sched">orario programmato</span>';
+  if (!l.live || l.delay == null) return `<span class="sched">orario programmato${l.mode === 'metro' ? ' (stato linea controllato)' : ''}</span>`;
   const m = Math.round(l.delay / 60);
   if (m >= 1) return `<span class="live late">live · +${m}′</span>`;
   if (m <= -1) return `<span class="live">live · ${-m}′ in anticipo</span>`;
@@ -203,6 +203,7 @@ function steps(j) {
     return `<li class="st ride" style="--c:${esc(l.color)}"><span class="ico">${chip(l)}</span><div>
       <div class="dir">→ ${esc(l.headsign || l.to.name)}</div>
       <div><time>${fmtTime(l.dep)}</time> Sali a <b>${esc(l.from.name)}</b> ${liveText(l)}</div>
+      ${l.alert ? `<div class="st-alert">⚠ ${esc(l.alert)}</div>` : ''}
       ${n > 1 ? `<details><summary>${n} fermate · ${mins(l.arr - l.dep)} min</summary><ul class="stops">${mid}</ul></details>` : `<div class="muted">1 fermata · ${mins(l.arr - l.dep)} min</div>`}
       <div><time>${fmtTime(l.arr)}</time> Scendi a <b>${esc(l.to.name)}</b></div>
     </div></li>`;
@@ -315,7 +316,8 @@ function departuresHtml(deps) {
         return `<span class="${d.live ? 'live' : ''}"${late}>${txt}</span>`;
       })
       .join('');
-    return `<li>${chip(g[0])}<span class="hs">${esc(g[0].headsign)}</span><span class="times">${times}</span></li>`;
+    const warn = g[0].alert ? ` <span class="st-alert" title="${esc(g[0].alert)}">⚠</span>` : '';
+    return `<li>${chip(g[0])}<span class="hs">${esc(g[0].headsign)}${warn}</span><span class="times">${times}</span></li>`;
   });
   return `<ul class="deplist">${rows.join('')}</ul><div class="legend-live"><span class="live">verde</span> = in tempo reale</div>`;
 }

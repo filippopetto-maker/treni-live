@@ -196,3 +196,20 @@ html, body { margin: 0; height: 100%; }
   padding: 5px 8px; cursor: pointer; font-size: 12px;
 }
 .pop-actions button:hover { background: rgba(127,127,127,.12); }
+
+/* Stato metro */
+#metroStatus:empty { display: none; }
+#metroStatus { margin: 6px 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.mhead { font-weight: 600; margin-bottom: 5px; }
+.mhead small { color: var(--muted); font-weight: 400; }
+.mchips { display: flex; flex-wrap: wrap; gap: 4px; }
+.mchip { background: var(--c); color: #fff; font-weight: 700; border-radius: 5px; padding: 1px 6px; font-size: 11px; position: relative; }
+.mchip.lvl-warn, .mchip.lvl-station { box-shadow: 0 0 0 2px var(--warn); }
+.mchip.lvl-stop { box-shadow: 0 0 0 2px var(--bad); }
+.mchip.lvl-stop::after { content: '⨯'; margin-left: 3px; }
+.malerts { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
+.malerts li { line-height: 1.35; padding-left: 8px; border-left: 3px solid var(--muted); }
+.malerts li.lvl-stop { border-color: var(--bad); }
+.malerts li.lvl-warn, .malerts li.lvl-station { border-color: var(--warn); }
+.warnline { color: var(--warn); font-weight: 600; }
+.st-alert { color: var(--warn); font-size: 12px; font-weight: 600; }

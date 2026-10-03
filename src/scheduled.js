@@ -6,6 +6,7 @@
 import { localTime } from './planner/index.js';
 import { dist } from './planner/gtfs-net.js';
 import { log } from './util.js';
+import { inSpan } from './metro-status.js';
 
 const MODES = new Set(['metro']);
 const METRO_COLORS = {
@@ -46,8 +47,9 @@ function cutShape(shape, stops) {
 }
 
 export class ScheduledMetro {
-  constructor({ planner }) {
+  constructor({ planner, status }) {
     this.planner = planner;
+    this.status = status;
     this.days = new Map(); // "roma/20261003" → { patterns } | Promise
   }
 
@@ -91,6 +93,11 @@ export class ScheduledMetro {
    * { c: coordinate, t0, t1 } (sosta in stazione = un solo punto) da far scorrere nel browser.
    */
   async vehicles(feedId, bb, now = Date.now()) {
+    if (this.status) {
+      // La prima volta aspetto lo stato delle linee; poi si aggiorna in sottofondo.
+      const p = this.status.refresh();
+      if (!this.status.at) await p;
+    }
     const lt = localTime(now);
     const sets = [{ d: await this.day(feedId, lt.ymd), shift: 0 }];
     if (lt.sec < 4 * 3600) {
@@ -121,6 +128,12 @@ export class ScheduledMetro {
           }
           const cur = legs[0].c;
           if (!inside(cur[0]) && !inside(cur[cur.length - 1])) continue;
+          // Linea o tratta ferma secondo l'azienda: niente treni "da orario" lì.
+          const st = this.status?.get(feedId, P.line);
+          if (st?.level === 'stop' && inSpan(st.span, P.stops, k - 1)) {
+            this.hidden = (this.hidden || 0) + 1;
+            continue;
+          }
           const t = P.trips[j];
           out.push({
             feed: feedId,
@@ -134,6 +147,7 @@ export class ScheduledMetro {
             next: P.stops[Math.min(k, n - 1)].name,
             legs,
             scheduled: true,
+            alert: st && st.level !== 'ok' ? { level: st.level, text: st.text } : undefined,
           });
         }
       }

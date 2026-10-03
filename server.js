@@ -16,6 +16,7 @@ import { trainRoute } from './src/routes.js';
 import { Planner } from './src/planner/index.js';
 import { fixStations } from './src/station-fix.js';
 import { ScheduledMetro } from './src/scheduled.js';
+import { MetroStatus } from './src/metro-status.js';
 import { log, activity } from './src/util.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -34,7 +35,9 @@ const italo = new ItaloTracker({ stations, rail });
 const transit = new TransitFeeds(path.join(ROOT, 'feeds.json'), path.join(ROOT, 'data'));
 await transit.load();
 const planner = new Planner({ dataDir: path.join(ROOT, 'data'), transit, stations, trackers: [vt, italo], rail });
-transit.metro = new ScheduledMetro({ planner });
+const metroStatus = new MetroStatus();
+planner.metroStatus = metroStatus;
+transit.metro = new ScheduledMetro({ planner, status: metroStatus });
 rail.start();
 // Appena i binari sono pronti, corregge le stazioni con coordinate sbagliate (lontane dai binari).
 const railWait = setInterval(() => {

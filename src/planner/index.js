@@ -6,6 +6,7 @@ import { RailLiveNet } from './rail-net.js';
 import { raptor, unwind, INF } from './raptor.js';
 import { simplify } from '../rail.js';
 import { fetchWithTimeout, normName, log } from '../util.js';
+import { inSpan } from '../metro-status.js';
 
 const ACCESS_M = 800;
 const ACCESS_MAX_M = 1500;
@@ -130,6 +131,15 @@ export class Planner {
           delay = net.tripDelay;
         }
       }
+      // Metro ferma (linea o tratta) secondo ATM / Roma Mobilità: quelle corse non si usano.
+      if (live && this.metroStatus) {
+        await this.metroStatus.refresh();
+        const ban = [lt.ymd, prevYmd(lt.ymd)].flatMap((ymd) => this.bannedTrips(net, ymd));
+        if (ban.length) {
+          delay = delay ? Int32Array.from(delay) : new Int32Array(net.tripIds.length);
+          for (const t of ban) delay[t] = 1e7;
+        }
+      }
       const sets = [{ d: net.day(lt.ymd), shift: 0, delay: early ? null : delay }];
       if (early) sets.push({ d: net.day(prevYmd(lt.ymd)), shift: -86400, delay });
       views.push({ net, off, slack: 60, sets, kind: 'city' });
@@ -140,6 +150,28 @@ export class Planner {
       views.push({ net: rail, off, slack: 180, sets: [{ d: rail.day(lt.midnight), shift: 0, delay: null }], kind: 'rail' });
     }
     return { views, lt };
+  }
+
+  /** Corse di metro su linee/tratte dichiarate ferme (indici interni della rete). */
+  bannedTrips(net, ymd) {
+    const out = [];
+    for (const P of net.day(ymd).patterns) {
+      const info = net.tripInfo(P.trips[0]);
+      if (info.mode !== 'metro') continue;
+      const st = this.metroAlert(net.id, info);
+      if (st?.level !== 'stop') continue;
+      const stops = Array.from(P.stops, (s) => net.stops[s]);
+      let hit = false;
+      for (let i = 0; i < stops.length - 1 && !hit; i++) hit = inSpan(st.span, stops, i);
+      if (hit) out.push(...P.trips);
+    }
+    return out;
+  }
+
+  metroAlert(netId, info) {
+    if (info.mode !== 'metro' || !this.metroStatus) return null;
+    const st = this.metroStatus.get(netId, lineInfo(netId, info).line);
+    return st && st.level !== 'ok' ? st : null;
   }
 
   /** Fermate raggiungibili a piedi da un punto: [[fermataGlobale, secondi], …]. */
@@ -340,6 +372,7 @@ export class Planner {
         live,
         feed: v.net.id,
         tripId: info.tripId,
+        alert: this.metroAlert(v.net.id, info)?.text,
         coords: this.shapeCoords(v.net, info.shape, stops),
       });
     }
@@ -440,6 +473,7 @@ export class Planner {
     } else {
       const net = await this.readyNet(src);
       if (!net) return null;
+      await this.metroStatus?.refresh();
       const s = +key;
       stop = net.stops[s];
       if (!stop) return null;
@@ -464,9 +498,12 @@ export class Planner {
             const t = lt.midnight + sec * 1000;
             if (t < now - 60_000 || t > now + minutes * 60_000) continue;
             const info = net.tripInfo(ti);
+            const alert = this.metroAlert(net.id, info);
+            // Linea metro ferma per intero: niente partenze "da orario".
+            if (alert?.level === 'stop' && !alert.span) continue;
             out.push({
               t, mode: info.mode, headsign: info.headsign, ...lineInfo(net.id, info),
-              delay: live ? delay : null, live, feed: net.id, tripId: info.tripId,
+              delay: live ? delay : null, live, feed: net.id, tripId: info.tripId, alert: alert?.text,
             });
           }
         }

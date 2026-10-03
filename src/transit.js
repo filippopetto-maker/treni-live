@@ -163,6 +163,53 @@ export function decodeTripUpdates(buf) {
   return out;
 }
 
+const EFFECTS = { 1: 'NO_SERVICE', 2: 'REDUCED_SERVICE', 3: 'SIGNIFICANT_DELAYS', 4: 'DETOUR', 5: 'ADDITIONAL_SERVICE', 6: 'MODIFIED_SERVICE', 7: 'OTHER_EFFECT', 8: 'UNKNOWN_EFFECT', 9: 'STOP_MOVED' };
+
+/** Avvisi (ServiceAlerts): [{ id, start, end, routes, stops, effect, header, text }]. Orari in secondi Unix. */
+export function decodeAlerts(buf) {
+  const out = [];
+  const tr = (r) => {
+    let it = '';
+    let any = '';
+    parse(r.bytes(), {
+      1: (r2) => {
+        let text = '';
+        let lang = '';
+        parse(r2.bytes(), { 1: (r3) => (text = r3.string()), 2: (r3) => (lang = r3.string()) });
+        if (!any) any = text;
+        if (/^it/i.test(lang)) it = text;
+      },
+    });
+    return it || any;
+  };
+  parse(buf, {
+    2: (r) => {
+      const a = { routes: [], stops: [], periods: [] };
+      parse(r.bytes(), {
+        1: (r2) => (a.id = r2.string()),
+        5: (r2) =>
+          parse(r2.bytes(), {
+            1: (r3) => {
+              const p = [0, 0];
+              parse(r3.bytes(), { 1: (r4) => (p[0] = r4.varint()), 2: (r4) => (p[1] = r4.varint()) });
+              a.periods.push(p);
+            },
+            5: (r3) =>
+              parse(r3.bytes(), {
+                2: (r4) => a.routes.push(r4.string()),
+                5: (r4) => a.stops.push(r4.string()),
+              }),
+            7: (r3) => (a.effect = EFFECTS[r3.varint()] || 'UNKNOWN_EFFECT'),
+            10: (r3) => (a.header = tr(r3)),
+            11: (r3) => (a.text = tr(r3)),
+          }),
+      });
+      if (a.header || a.text) out.push(a);
+    },
+  });
+  return out;
+}
+
 // ---------- gestione dei feed ----------
 
 export class TransitFeeds {
@@ -285,6 +332,7 @@ export class TransitFeeds {
         }
       }
     }
-    return { feeds: hit.map((f) => ({ id: f.id, name: f.name, error: this.cache.get(f.id)?.error })), vehicles, metro };
+    const metroStatus = this.metro?.status ? this.metro.status.summary(hit.map((f) => f.id)) : [];
+    return { feeds: hit.map((f) => ({ id: f.id, name: f.name, error: this.cache.get(f.id)?.error })), vehicles, metro, metroStatus };
   }
 }
