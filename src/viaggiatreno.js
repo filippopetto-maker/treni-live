@@ -39,7 +39,13 @@ export class ViaggiaTrenoTracker {
     this.st = stations;
     this.rail = rail;
     this.hubs = hubStations(stations);
-    this.limiter = new Limiter({ concurrency: 6, rps });
+    // Le altre stazioni (tra cui Roma Tiburtina, Milano Lambrate, Torino Porta Susa: l'anagrafica
+    // non le segna come principali) si leggono a rotazione, un terzo per giro, solo le partenze:
+    // così si trovano anche i treni che non passano da nessuna stazione principale.
+    const hubSet = new Set(this.hubs.map((h) => h.code));
+    this.others = stations.list.filter((s) => !hubSet.has(s.code)).sort(() => Math.random() - 0.5);
+    this.othersPos = 0;
+    this.limiter = new Limiter({ concurrency: 14, rps });
     this.refreshMs = refreshMs;
     this.sweepMs = sweepMs;
     this.trains = new Map(); // key "S01700/9651/1790892000000" → stato
@@ -49,7 +55,7 @@ export class ViaggiaTrenoTracker {
   }
 
   start() {
-    log(`ViaggiaTreno: ${this.hubs.length} stazioni per la scoperta, ${this.st.list.length} in anagrafica`);
+    log(`ViaggiaTreno: ${this.hubs.length} stazioni principali a ogni giro + ${this.others.length} a rotazione (1/3 per giro), ${this.st.list.length} in anagrafica`);
     this.sweepLoop();
     this.statsLoop();
     setInterval(() => this.scheduleRefresh(), 1000);
@@ -71,9 +77,14 @@ export class ViaggiaTrenoTracker {
       const t0 = Date.now();
       const date = vtDate();
       const before = this.trains.size;
-      await Promise.all(
-        this.hubs.flatMap((h) => [this.readBoard('partenze', h, date), this.readBoard('arrivi', h, date)])
-      );
+      const n = Math.ceil(this.others.length / 3);
+      const chunk = [];
+      for (let i = 0; i < n && this.others.length; i++) chunk.push(this.others[(this.othersPos + i) % this.others.length]);
+      this.othersPos = (this.othersPos + n) % Math.max(1, this.others.length);
+      await Promise.all([
+        ...this.hubs.flatMap((h) => [this.readBoard('partenze', h, date), this.readBoard('arrivi', h, date)]),
+        ...chunk.map((s) => this.readBoard('partenze', s, date)),
+      ]);
       this.sweeps++;
       this.lastSweepMs = Date.now() - t0;
       log(
@@ -124,7 +135,7 @@ export class ViaggiaTrenoTracker {
   // ---------- 2. aggiornamento ----------
 
   scheduleRefresh() {
-    if (this.limiter.queuedHi > 12) return;
+    if (this.limiter.queuedHi > 30) return;
     const now = Date.now();
     const minAge = MODES[activity.mode].refresh;
     const due = [];
@@ -134,7 +145,7 @@ export class ViaggiaTrenoTracker {
       due.push(tr);
     }
     due.sort((a, b) => a.nextRefresh - b.nextRefresh);
-    for (const tr of due.slice(0, 24 - this.limiter.queuedHi)) {
+    for (const tr of due.slice(0, 40 - this.limiter.queuedHi)) {
       tr.inflight = true;
       this.refresh(tr).finally(() => (tr.inflight = false));
     }
@@ -177,8 +188,13 @@ export class ViaggiaTrenoTracker {
     });
     tr.cat = categoryOf(tr.label);
     if (seg?.status === 'notstarted' && seg.departure) {
-      // Non ancora partito: ricontrollo poco prima della partenza.
-      tr.nextRefresh = Math.max(now + this.refreshMs, seg.departure - 3 * 60_000);
+      // Non ancora partito: ricontrollo subito dopo l'orario di partenza (prima è inutile),
+      // poi ogni 90 s finché non risulta partito (treni in ritardo alla partenza).
+      tr.nextRefresh = seg.departure > now ? seg.departure + 30_000 : now + 90_000;
+    } else if (seg?.status === 'running' && seg.to && seg.to[2] - now > 10 * 60_000) {
+      // Lunga tratta senza fermate (es. Frecce Milano–Bologna): la posizione si interpola bene,
+      // basta aggiornare un po' meno spesso.
+      tr.nextRefresh = now + this.refreshMs * (1.4 + Math.random() * 0.3);
     } else {
       // Un po' di jitter per spalmare le richieste nel tempo.
       tr.nextRefresh = now + this.refreshMs * (0.85 + Math.random() * 0.3);

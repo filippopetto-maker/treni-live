@@ -26,7 +26,7 @@ const rail = new RailNetwork({ dataDir: path.join(ROOT, 'data'), stations });
 const vt = new ViaggiaTrenoTracker({
   stations,
   rail,
-  rps: Number(process.env.VT_RPS) || 8,
+  rps: Number(process.env.VT_RPS) || 14,
   refreshMs: (Number(process.env.VT_REFRESH_S) || 150) * 1000,
 });
 const italo = new ItaloTracker({ stations, rail });
