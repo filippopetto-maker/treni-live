@@ -161,7 +161,11 @@ export class GtfsNetwork {
       this.loading = null;
       log(`Navigatore: rete ${this.id} in memoria (${this.stops.length} fermate, ${nT.toLocaleString('it-IT')} corse)`);
       return this;
-    })();
+    })().catch((e) => {
+      this.loading = null; // si potrà riprovare
+      log(`Navigatore: preparazione di ${this.id} non riuscita: ${e.message}`);
+      throw e;
+    });
     return this.loading;
   }
 

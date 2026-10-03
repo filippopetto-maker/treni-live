@@ -93,10 +93,21 @@ export class Planner {
     if (!n) return null;
     if (!n.statics.ready) throw new Error(`orari di ${n.feed.name} ancora in preparazione, riprova tra poco`);
     if (MAX_NETS && !n.loaded) {
+      // Una città alla volta: se un'altra si sta ancora preparando, si aspetta il proprio turno.
+      if ([...this.nets.values()].some((x) => x !== n && x.loading)) {
+        throw new Error('sto preparando gli orari di un\'altra città, riprova tra un paio di minuti');
+      }
       const others = [...this.nets.values()].filter((x) => x !== n && x.loaded).sort((a, b) => a.lastUse - b.lastUse);
       while (others.length >= MAX_NETS) others.shift().unload();
     }
-    await n.load();
+    // La prima preparazione degli orari può richiedere minuti su un server lento:
+    // si risponde subito e il lavoro continua in sottofondo.
+    const p = n.load();
+    const wait = await Promise.race([p.then(() => 'ok'), new Promise((r) => setTimeout(() => r('lento'), 20_000))]);
+    if (wait === 'lento') {
+      p.catch(() => {});
+      throw new Error(`sto preparando gli orari di ${n.feed.name.split(' —')[0]} (succede una volta al giorno): riprova tra un paio di minuti`);
+    }
     return n;
   }
 
