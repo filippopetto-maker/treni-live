@@ -67,6 +67,11 @@ html, body { margin: 0; height: 100%; }
 .dot.ic { background: var(--ic); }
 .dot.reg { background: var(--reg); }
 .dot.bus { background: var(--bus); border-radius: 3px; }
+.dot.tram { background: #0f8b8d; border-radius: 3px; }
+.dot.filobus { background: #b5179e; border-radius: 3px; }
+.dot.metro { background: conic-gradient(#e2231a 0 25%, #f9a800 0 50%, #00a650 0 75%, #0a5db4 0); }
+.legend.urban { flex-wrap: wrap; gap: 4px 10px; }
+.legend.urban .dot { width: 9px; height: 9px; }
 
 .legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; margin: 6px 0; }
 .legend span { display: flex; align-items: center; gap: 4px; }

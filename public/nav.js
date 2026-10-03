@@ -420,7 +420,7 @@ map.on('load', () => {
   map.on('mouseleave', 'stops', () => (map.getCanvas().style.cursor = ''));
   map.on('click', 'stops', (e) => {
     // Un mezzo sopra la fermata ha la precedenza.
-    if (map.queryRenderedFeatures(e.point, { layers: ['transit', 'trains'] }).length) return;
+    if (map.queryRenderedFeatures(e.point, { layers: ['transit', 'trains', 'metro'] }).length) return;
     showStop(e.features[0].properties, e.features[0].geometry.coordinates);
   });
   map.on('moveend', loadStops);

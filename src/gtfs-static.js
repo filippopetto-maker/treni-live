@@ -11,7 +11,10 @@ import { promisify } from 'node:util';
 import { fetchWithTimeout, log } from './util.js';
 import { simplify } from './rail.js';
 
+import { modeOf } from './planner/gtfs-net.js';
+
 const run = promisify(execFile);
+const FILOBUS = { roma: new Set(['60', '74', '90']), milano: new Set(['90', '91', '92', '93']) };
 const MAX_AGE = 7 * 24 * 3600 * 1000;
 
 export class GtfsStatic {
@@ -91,7 +94,11 @@ export class GtfsStatic {
   info(tripId, routeId) {
     const t = this.trips.get(tripId);
     const r = this.routes.get(t ? t[0] : routeId);
-    return { rname: r?.short || routeId, dest: t?.[2] || '', rcolor: r?.color || null, shape: t?.[1] };
+    const rname = r?.short || routeId;
+    let mode = modeOf(r?.type);
+    // I filobus nei GTFS di Roma e Milano risultano "bus": li riconosco dal numero di linea.
+    if (mode === 'bus' && FILOBUS[this.feed.id]?.has(rname)) mode = 'filobus';
+    return { rname, dest: t?.[2] || '', rcolor: r?.color || null, shape: t?.[1], mode };
   }
 
   /** Forma completa della corsa (coordinate semplificate) o null. */

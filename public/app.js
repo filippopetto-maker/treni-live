@@ -5,7 +5,13 @@
 const TRAIN_POLL_MS = 15_000;
 const TRANSIT_POLL_MS = 20_000;
 const TRANSIT_MIN_ZOOM = 11;
-const COLORS = { av: '#d6202a', italo: '#8a1538', ic: '#1f5fbf', reg: '#2e9e5b', bus: '#e08a00' };
+const COLORS = {
+  av: '#d6202a', italo: '#8a1538', ic: '#1f5fbf', reg: '#2e9e5b',
+  bus: '#e08a00', tram: '#0f8b8d', filobus: '#b5179e', metro: '#c0392b',
+};
+const MODE_NAMES = { bus: 'Bus', tram: 'Tram', filobus: 'Filobus', metro: 'Metro' };
+let metroVehicles = [];
+let metroOn = true;
 
 const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 const map = new maplibregl.Map({
@@ -223,9 +229,12 @@ async function pollTransit() {
   clearTimeout(transitTimer);
   const src = map.getSource('transit');
   if (!src) return;
-  if (!transitOn || map.getZoom() < TRANSIT_MIN_ZOOM) {
+  if ((!transitOn && !metroOn) || map.getZoom() < TRANSIT_MIN_ZOOM) {
     src.setData({ type: 'FeatureCollection', features: [] });
+    metroVehicles = [];
+    renderMetro();
     $('#transitCount').textContent = transitOn ? 'zoom' : '–';
+    $('#metroCount').textContent = metroOn ? 'zoom' : '–';
     $('#hint').textContent = '';
     return;
   }
@@ -233,15 +242,19 @@ async function pollTransit() {
   const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((x) => x.toFixed(4)).join(',');
   try {
     const data = await (await fetch(`/api/transit?bbox=${bbox}`)).json();
+    const surface = transitOn ? data.vehicles : [];
     src.setData({
       type: 'FeatureCollection',
-      features: data.vehicles.map((v) => ({
+      features: surface.map((v) => ({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [v.lon, v.lat] },
         properties: { ...v, route: v.route || '' },
       })),
     });
-    $('#transitCount').textContent = data.vehicles.length.toLocaleString('it-IT');
+    metroVehicles = metroOn ? data.metro || [] : [];
+    renderMetro();
+    $('#transitCount').textContent = surface.length.toLocaleString('it-IT');
+    $('#metroCount').textContent = metroVehicles.length.toLocaleString('it-IT');
     if (selected?.kind === 'vehicle') {
       const v = data.vehicles.find((x) => x.id === selected.id && x.feed === selected.feed);
       if (v) {
@@ -255,9 +268,47 @@ async function pollTransit() {
       ? 'Nessun feed bus/tram in tempo reale configurato per questa zona (vedi feeds.json).'
       : errors.length
         ? `Feed non disponibile: ${errors.map((f) => f.name).join(', ')}`
-        : `Bus e tram: ${data.feeds.map((f) => f.name).join(', ')}`;
+        : `Mezzi urbani: ${data.feeds.map((f) => f.name).join(', ')}. Metro: posizione stimata dagli orari.`;
   } catch {}
   transitTimer = setTimeout(pollTransit, TRANSIT_POLL_MS);
+}
+
+// ---------- metro da orario ----------
+// Ogni treno della metro arriva con i prossimi tratti { c, t0, t1 } (forma reale della linea
+// tra due stazioni, oppure un punto se è in sosta): qui lo si fa scorrere ogni secondo.
+
+function metroPosition(v, now) {
+  const legs = v.legs;
+  let leg = legs.find((l) => now < l.t1) || legs[legs.length - 1];
+  if (now < legs[0].t0) leg = legs[0];
+  if (leg.c.length === 1) return leg.c[0];
+  leg._p ||= preparePath(leg.c);
+  // Gli orari GTFS della metro non hanno la sosta: ne simulo ~25 s per stazione
+  // (metà a inizio tratta, metà alla fine), così il treno si ferma davvero in banchina.
+  const dur = leg.t1 - leg.t0 || 1;
+  const d = Math.min(12_000, dur * 0.15);
+  const f = Math.max(0, Math.min(1, (now - leg.t0 - d) / (dur - 2 * d)));
+  return alongPath(leg._p, f);
+}
+
+function renderMetro() {
+  const src = map.getSource('metro');
+  if (!src) return;
+  const now = Date.now() + clockOffset;
+  const features = metroVehicles.map((v) => {
+    const pos = metroPosition(v, now);
+    if (selected?.kind === 'vehicle' && selected.id === v.id) {
+      selected.pos = pos;
+      openPopup?.setLngLat(pos);
+    }
+    return {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: pos },
+      properties: { id: v.id, feed: v.feed, trip: v.trip, route: v.route, rname: v.rname, dest: v.dest, color: v.color, mode: 'metro', next: v.next, scheduled: true },
+    };
+  });
+  src.setData({ type: 'FeatureCollection', features });
+  if (selected?.kind === 'vehicle' && selected.id?.startsWith('m:')) drawSelected();
 }
 
 // ---------- popup ----------
@@ -324,20 +375,25 @@ function showVehicle(p, lngLat) {
   followId = null;
   openPopup?.remove();
   const age = p.ts ? Math.round((Date.now() / 1000 - p.ts) / 60) : null;
+  const mode = p.mode || 'bus';
+  const color = p.color || COLORS[mode] || COLORS.bus;
+  const body =
+    mode === 'metro'
+      ? `<dt>Prossima</dt><dd>${esc(p.next || '')}</dd>
+         <dt>Posizione</dt><dd>stimata dall'orario <small>(la metro non trasmette la posizione)</small></dd>`
+      : `<dt>Vettura</dt><dd>${esc(p.vlabel || p.vid || p.id)}</dd>
+         ${p.speed ? `<dt>Velocità</dt><dd>${p.speed} km/h</dd>` : ''}
+         ${age !== null ? `<dt>Posizione</dt><dd>${age <= 0 ? 'adesso' : `${age} min fa`}</dd>` : ''}`;
   openPopup = new maplibregl.Popup({ offset: 8 })
     .setLngLat(lngLat)
     .setHTML(
-      `<div class="pop"><h3><i class="dot bus"></i>Linea ${esc(p.rname || p.route || '?')}</h3>
+      `<div class="pop"><h3><i class="dot" style="background:${esc(color)}"></i>${MODE_NAMES[mode] || 'Linea'} ${esc(p.rname || p.route || '?')}</h3>
        ${p.dest ? `<div class="route">→ ${esc(p.dest)}</div>` : ''}
-       <dl>
-         <dt>Vettura</dt><dd>${esc(p.vlabel || p.vid || p.id)}</dd>
-         ${p.speed ? `<dt>Velocità</dt><dd>${p.speed} km/h</dd>` : ''}
-         ${age !== null ? `<dt>Posizione</dt><dd>${age <= 0 ? 'adesso' : `${age} min fa`}</dd>` : ''}
-       </dl></div>`
+       <dl>${body}</dl></div>`
     )
     .addTo(map);
   openPopup.on('close', clearSelected);
-  selected = { kind: 'vehicle', id: p.id, feed: p.feed, color: COLORS.bus, pos: lngLat };
+  selected = { kind: 'vehicle', id: p.id, feed: p.feed, color, pos: lngLat };
   drawSelected();
   const q = new URLSearchParams({ feed: p.feed, trip: p.trip || '', route: p.route || '' });
   fetch(`/api/vehicle/route?${q}`)
@@ -396,7 +452,7 @@ map.on('load', () => {
     source: 'transit',
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 3, 15, 6],
-      'circle-color': '#e08a00',
+      'circle-color': ['match', ['get', 'mode'], 'tram', COLORS.tram, 'filobus', COLORS.filobus, COLORS.bus],
       'circle-stroke-color': '#fff',
       'circle-stroke-width': 1,
     },
@@ -412,7 +468,33 @@ map.on('load', () => {
       'text-size': 10,
       'text-offset': [0, 1.1],
     },
-    paint: { 'text-color': '#a35f00', 'text-halo-color': '#fff', 'text-halo-width': 1.2 },
+    paint: {
+      'text-color': ['match', ['get', 'mode'], 'tram', COLORS.tram, 'filobus', COLORS.filobus, '#a35f00'],
+      'text-halo-color': '#fff',
+      'text-halo-width': 1.2,
+    },
+  });
+
+  // Metro (posizione stimata dagli orari): pallino più grande col colore della linea.
+  map.addSource('metro', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({
+    id: 'metro',
+    type: 'circle',
+    source: 'metro',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4.5, 15, 9],
+      'circle-color': ['get', 'color'],
+      'circle-stroke-color': '#fff',
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 15, 2.2],
+    },
+  });
+  map.addLayer({
+    id: 'metro-label',
+    type: 'symbol',
+    source: 'metro',
+    minzoom: 13,
+    layout: { 'text-field': ['get', 'rname'], 'text-font': ['Noto Sans Bold'], 'text-size': 9, 'text-allow-overlap': true },
+    paint: { 'text-color': '#fff' },
   });
 
   map.addLayer({
@@ -443,7 +525,9 @@ map.on('load', () => {
     paint: { 'text-color': dark ? '#eef0f4' : '#1d2330', 'text-halo-color': dark ? '#181b22' : '#ffffff', 'text-halo-width': 1.4 },
   });
 
-  for (const layer of ['trains', 'transit']) {
+  map.on('click', 'metro', (e) => showVehicle(e.features[0].properties, e.features[0].geometry.coordinates));
+  setInterval(renderMetro, 1000);
+  for (const layer of ['trains', 'transit', 'metro']) {
     map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'));
     map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''));
   }
@@ -476,6 +560,10 @@ document.querySelectorAll('[data-cat]').forEach((cb) =>
 );
 $('#transitToggle').addEventListener('change', (e) => {
   transitOn = e.target.checked;
+  pollTransit();
+});
+$('#metroToggle').addEventListener('change', (e) => {
+  metroOn = e.target.checked;
   pollTransit();
 });
 $('#collapse').addEventListener('click', () => {

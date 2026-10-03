@@ -269,10 +269,22 @@ export class TransitFeeds {
       for (const v of r.vehicles) {
         if (v.lon < x0 || v.lon > x1 || v.lat < y0 || v.lat > y1) continue;
         const extra = st?.ready ? st.info(v.trip, v.route) : {};
-        vehicles.push({ feed: f.id, ...v, rname: extra.rname, dest: extra.dest });
+        vehicles.push({ feed: f.id, ...v, rname: extra.rname, dest: extra.dest, mode: extra.mode || 'bus' });
         if (vehicles.length >= 5000) break;
       }
     }
-    return { feeds: hit.map((f) => ({ id: f.id, name: f.name, error: this.cache.get(f.id)?.error })), vehicles };
+    // Metro ricostruita dagli orari (nessuna delle due città pubblica le posizioni live).
+    const metro = [];
+    if (this.metro) {
+      for (const f of hit) {
+        if (!this.statics.get(f.id)?.ready) continue;
+        try {
+          metro.push(...(await this.metro.vehicles(f.id, bb)));
+        } catch (e) {
+          log(`Metro ${f.id}: ${e.message}`);
+        }
+      }
+    }
+    return { feeds: hit.map((f) => ({ id: f.id, name: f.name, error: this.cache.get(f.id)?.error })), vehicles, metro };
   }
 }
