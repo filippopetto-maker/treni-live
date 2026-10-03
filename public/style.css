@@ -213,3 +213,40 @@ html, body { margin: 0; height: 100%; }
 .malerts li.lvl-warn, .malerts li.lvl-station { border-color: var(--warn); }
 .warnline { color: var(--warn); font-weight: 600; }
 .st-alert { color: var(--warn); font-size: 12px; font-weight: 600; }
+
+/* ---------- Notiziario ---------- */
+#ticker {
+  position: absolute; top: 10px; right: 54px; z-index: 3;
+  width: min(720px, calc(100vw - 400px)); height: 34px;
+  display: flex; align-items: stretch;
+  background: #fff; color: #1d2330; border-radius: 9px; overflow: hidden;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16); font-size: 13px;
+}
+.tk-label {
+  flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px;
+  background: #1d2330; color: #fff; font-weight: 800; letter-spacing: 0.04em; font-size: 11px;
+}
+.tk-label span { font-weight: 500; letter-spacing: 0; font-size: 12px; opacity: 0.8; text-transform: none; }
+.tk-view {
+  flex: 1; overflow: hidden; position: relative;
+  mask-image: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+}
+.tk-track { display: flex; width: max-content; height: 100%; animation: tk-scroll 40s linear infinite; }
+#ticker:hover .tk-track { animation-play-state: paused; }
+.tk-run { display: flex; align-items: center; white-space: nowrap; padding-left: 24px; }
+@keyframes tk-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.tk-item { display: inline-flex; align-items: center; gap: 6px; }
+.tk-item i { width: 8px; height: 8px; border-radius: 50%; background: #8a93a5; flex: none; }
+.tk-item b { font-size: 11px; text-transform: uppercase; color: #6b7385; letter-spacing: 0.03em; }
+.tk-item.lvl-ok i { background: var(--ok); }
+.tk-item.lvl-warn i, .tk-item.lvl-station i { background: var(--warn); }
+.tk-item.lvl-stop i { background: var(--bad); }
+.tk-item.lvl-stop { font-weight: 600; }
+.tk-sep { color: #b6bcc8; margin: 0 14px; }
+@media (max-width: 900px) {
+  #ticker { top: auto; bottom: 30px; left: 12px; right: 12px; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tk-track { animation-duration: 0s !important; }
+  .tk-view { overflow-x: auto; }
+}

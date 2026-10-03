@@ -10,7 +10,7 @@ import { inSpan } from './metro-status.js';
 
 const MODES = new Set(['metro']);
 const METRO_COLORS = {
-  roma: { MEA: '#f7931d', MEB: '#0a5db4', MEB1: '#0a5db4', MEC: '#2fa84f' },
+  roma: { MEA: '#d6202a', MEB: '#0a5db4', MEB1: '#0a5db4', MEC: '#2fa84f' },
   milano: { 1: '#e2231a', 2: '#00a650', 3: '#f9a800', 4: '#0072bc', 5: '#8c4fa3' },
 };
 const lineName = (feed, short) => (feed === 'roma' ? short.replace(/^ME/, '') : 'M' + short);

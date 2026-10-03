@@ -18,7 +18,7 @@ const TZ = 'Europe/Rome';
 
 // Colori ufficiali delle metropolitane (i GTFS di Roma e Milano non li indicano).
 const METRO_COLORS = {
-  roma: { A: '#f7931d', MEA: '#f7931d', B: '#0a5db4', MEB: '#0a5db4', B1: '#0a5db4', MEB1: '#0a5db4', C: '#2fa84f', MEC: '#2fa84f' },
+  roma: { A: '#d6202a', MEA: '#d6202a', B: '#0a5db4', MEB: '#0a5db4', B1: '#0a5db4', MEB1: '#0a5db4', C: '#2fa84f', MEC: '#2fa84f' },
   milano: { M1: '#e2231a', M2: '#00a650', M3: '#f9a800', M4: '#0072bc', M5: '#8c4fa3' },
 };
 const MODE_COLORS = { bus: '#e08a00', tram: '#2e8b57', metro: '#c0392b', treno: '#1565c0', filobus: '#b36b00', traghetto: '#0097a7' };

@@ -17,6 +17,7 @@ import { Planner } from './src/planner/index.js';
 import { fixStations } from './src/station-fix.js';
 import { ScheduledMetro } from './src/scheduled.js';
 import { MetroStatus } from './src/metro-status.js';
+import { NewsService } from './src/news.js';
 import { log, activity } from './src/util.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,7 @@ const planner = new Planner({ dataDir: path.join(ROOT, 'data'), transit, station
 const metroStatus = new MetroStatus();
 planner.metroStatus = metroStatus;
 transit.metro = new ScheduledMetro({ planner, status: metroStatus });
+const news = new NewsService({ stations, trackers: [vt, italo], metroStatus, cityFeeds: () => transit.feeds.filter((f) => f.static) });
 rail.start();
 // Appena i binari sono pronti, corregge le stazioni con coordinate sbagliate (lontane dai binari).
 const railWait = setInterval(() => {
@@ -174,6 +176,11 @@ const server = http.createServer(async (req, res) => {
       activity.touch();
       const r = await planner.arrivals(url.searchParams.get('id') || '');
       return r ? send(req, res, 200, r) : send(req, res, 404, { error: 'fermata non trovata' });
+    }
+    if (url.pathname === '/api/news') {
+      const bb = (url.searchParams.get('bbox') || '').split(',').map(Number);
+      const zoom = Number(url.searchParams.get('zoom')) || 5;
+      return send(req, res, 200, await news.get(bb.length === 4 && !bb.some(Number.isNaN) ? bb : null, zoom));
     }
     if (url.pathname === '/api/geocode') {
       return send(req, res, 200, await planner.geocode(url.searchParams.get('q'), ll(url.searchParams.get('near'))));

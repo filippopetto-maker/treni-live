@@ -315,7 +315,7 @@ function renderMetro() {
 
 // Stato delle linee (ATM per Milano, Roma Mobilità per Roma).
 const LINE_COLORS = {
-  A: '#f7931d', B: '#0a5db4', B1: '#0a5db4', C: '#2fa84f',
+  A: '#d6202a', B: '#0a5db4', B1: '#0a5db4', C: '#2fa84f',
   M1: '#e2231a', M2: '#00a650', M3: '#f9a800', M4: '#0072bc', M5: '#8c4fa3',
 };
 const LEVEL_TEXT = { ok: 'regolare', warn: 'rallentata', station: 'stazione chiusa', stop: 'interrotta', info: 'avviso' };

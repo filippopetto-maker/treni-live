@@ -10,6 +10,11 @@
 <body>
   <div id="map"></div>
 
+  <div id="ticker" aria-label="Notizie sulla circolazione">
+    <span class="tk-label">INFO<span id="tkScope">Italia</span></span>
+    <div class="tk-view"><div class="tk-track" id="tkTrack"><div class="tk-run"><span class="tk-item">Carico le notizie…</span></div></div></div>
+  </div>
+
   <aside id="panel">
     <header>
       <h1>Treni Live <span>Italia</span></h1>
@@ -83,5 +88,6 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="app.js"></script>
   <script src="nav.js"></script>
+  <script src="ticker.js"></script>
 </body>
 </html>
