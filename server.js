@@ -248,6 +248,23 @@ const server = http.createServer(async (req, res) => {
       return send(req, res, 200, await planner.geocode(url.searchParams.get('q'), ll(url.searchParams.get('near'))));
     }
 
+    if (url.pathname === '/api/line') {
+      // Linea bus/tram/metro cercata per nome nella città che contiene il punto (centro della mappa).
+      const lat = Number(url.searchParams.get('lat'));
+      const lon = Number(url.searchParams.get('lon'));
+      const q = (url.searchParams.get('q') || '').slice(0, 20);
+      const feed = transit.feeds.find((f) => lon >= f.bbox[0] && lon <= f.bbox[2] && lat >= f.bbox[1] && lat <= f.bbox[3]);
+      const st = feed && transit.statics.get(feed.id);
+      const line = st?.line(q);
+      if (!line) return send(req, res, 404, { error: 'linea non trovata' });
+      let live = null;
+      if (feed.url) {
+        const vp = await transit.vehicles(feed).catch(() => null);
+        const ids = new Set(line.routeIds);
+        live = (vp?.vehicles || []).filter((v) => ids.has(st.trips.get(v.trip)?.[0] || v.route)).length;
+      }
+      return send(req, res, 200, { ...line, live });
+    }
     if (url.pathname === '/api/push/key') {
       return send(req, res, 200, { key: webPush.publicKey });
     }

@@ -11,6 +11,8 @@ const COLORS = {
 };
 const MODE_NAMES = { bus: 'Bus', tram: 'Tram', filobus: 'Filobus', metro: 'Metro' };
 let metroVehicles = [];
+// Linea cercata (es. il 64): sulla mappa restano solo i suoi mezzi e il suo percorso.
+let lineFilter = null; // { feed, name, mode, color, live }
 let metroOn = true;
 
 const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -266,7 +268,9 @@ async function pollTransit() {
   const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((x) => x.toFixed(4)).join(',');
   try {
     const data = await (await fetch(`/api/transit?bbox=${bbox}`)).json();
-    const surface = transitOn ? data.vehicles : [];
+    // Bus e tram si riconoscono dal nome GTFS ("64"), la metro dal nome comune ("A", "M1").
+    const onLine = (v) => !lineFilter || (v.feed === lineFilter.feed && String(v.rname ?? v.route) === (v.mode === 'metro' || v.scheduled ? lineFilter.name : lineFilter.short));
+    const surface = transitOn ? data.vehicles.filter(onLine) : [];
     src.setData({
       type: 'FeatureCollection',
       features: surface.map((v) => ({
@@ -275,7 +279,7 @@ async function pollTransit() {
         properties: { ...v, route: v.route || '' },
       })),
     });
-    metroVehicles = metroOn ? data.metro || [] : [];
+    metroVehicles = metroOn ? (data.metro || []).filter((v) => !lineFilter || onLine(v)) : [];
     renderMetro(true);
     renderMetroStatus(metroOn ? data.metroStatus || [] : []);
     $('#transitCount').textContent = surface.length.toLocaleString('it-IT');
@@ -289,6 +293,11 @@ async function pollTransit() {
       }
     }
     const errors = data.feeds.filter((f) => f.error);
+    if (lineFilter) {
+      showLineHint(surface.length + metroVehicles.length);
+      transitTimer = setTimeout(pollTransit, TRANSIT_POLL_MS);
+      return;
+    }
     $('#hint').textContent = !data.feeds.length
       ? 'Nessun feed bus/tram in tempo reale configurato per questa zona (vedi feeds.json).'
       : errors.length
@@ -510,6 +519,23 @@ map.on('load', () => {
     paint: { 'line-color': ['get', 'color'], 'line-width': 4.5 },
   });
 
+  // Percorso della linea cercata (sotto i mezzi).
+  map.addSource('line-hl', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({
+    id: 'line-hl-casing',
+    type: 'line',
+    source: 'line-hl',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': dark ? '#181b22' : '#ffffff', 'line-width': 8, 'line-opacity': 0.9 },
+  });
+  map.addLayer({
+    id: 'line-hl',
+    type: 'line',
+    source: 'line-hl',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': ['get', 'color'], 'line-width': 4.5, 'line-opacity': 0.85 },
+  });
+
   map.addLayer({
     id: 'transit',
     type: 'circle',
@@ -663,10 +689,75 @@ if (mobile) {
   setPanel(false);
   $('#panel header').addEventListener('click', () => setPanel($('#panel').classList.contains('collapsed')));
 }
-$('#search').addEventListener('submit', (e) => {
+// ---------- linee bus/tram/metro (quando si è zoomati su una città) ----------
+
+const MODE_LABEL = { bus: 'Bus', tram: 'Tram', filobus: 'Filobus', metro: 'Metro' };
+
+function showLineHint(n) {
+  const l = lineFilter;
+  const live = l.live == null ? 'posizioni live non disponibili in questa città' : `${n} ${n === 1 ? 'mezzo' : 'mezzi'} in servizio nella zona`;
+  const pill = `<span class="line-pill" style="background:${esc(l.color)}">${esc(MODE_LABEL[l.mode] || 'Linea')} ${esc(l.name)}</span>`;
+  $('#hint').innerHTML = `${pill} ${l.long ? esc(l.long) + ' · ' : ''}${live}`;
+  // Etichetta sempre visibile sulla mappa (sul telefono il pannello è chiuso).
+  const chip = $('#lineChip');
+  chip.innerHTML = `${pill}<span>${l.live == null ? 'solo percorso' : `${n} in servizio`}</span><button type="button" aria-label="Mostra tutti i mezzi">✕</button>`;
+  chip.classList.remove('hidden');
+  chip.querySelector('button').onclick = clearLine;
+}
+
+function clearLine() {
+  lineFilter = null;
+  map.getSource('line-hl')?.setData({ type: 'FeatureCollection', features: [] });
+  $('#hint').textContent = '';
+  $('#lineChip').classList.add('hidden');
+  pollTransit();
+}
+
+async function searchLine(q) {
+  const c = map.getCenter();
+  const r = await fetch(`/api/line?q=${encodeURIComponent(q)}&lat=${c.lat.toFixed(4)}&lon=${c.lng.toFixed(4)}`);
+  if (!r.ok) return false;
+  const l = await r.json();
+  const color = l.mode === 'metro' && LINE_COLORS[l.name] ? LINE_COLORS[l.name] : l.color || COLORS[l.mode] || COLORS.bus;
+  lineFilter = { feed: l.feed, name: l.name, short: l.short, mode: l.mode, color, live: l.mode === 'metro' ? 0 : l.live, long: l.long };
+  map.getSource('line-hl')?.setData({
+    type: 'FeatureCollection',
+    features: l.dirs.map((d) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: d.coords }, properties: { color, headsign: d.headsign } })),
+  });
+  const b = new maplibregl.LngLatBounds();
+  l.dirs.forEach((d) => d.coords.forEach((p) => b.extend(p)));
+  if (mobile) {
+    $('#q').blur();
+    setPanel(false);
+  }
+  if (!b.isEmpty()) map.fitBounds(b, { padding: mobile ? { top: 60, bottom: 140, left: 30, right: 30 } : { top: 60, bottom: 60, left: 340, right: 60 }, maxZoom: 15, duration: 700 });
+  // Lo zoom minimo per vedere i mezzi urbani resta 11: se la linea è lunga si resta a 11.
+  map.once('moveend', () => {
+    if (map.getZoom() < TRANSIT_MIN_ZOOM) map.easeTo({ zoom: TRANSIT_MIN_ZOOM, duration: 300 });
+  });
+  showLineHint(0);
+  pollTransit();
+  return true;
+}
+
+// Il suggerimento nella casella cambia quando si è dentro una città.
+function updateSearchHint() {
+  $('#q').placeholder = map.getZoom() >= 10 ? 'Cerca treno o linea (es. 64, tram 8, 9651)' : 'Cerca treno (es. 9651, Italo 8981)';
+}
+map.on('zoomend', updateSearchHint);
+$('#q').addEventListener('input', () => !$('#q').value && lineFilter && clearLine());
+
+$('#search').addEventListener('submit', async (e) => {
   e.preventDefault();
   const q = $('#q').value.trim().toUpperCase().replace(/\s+/g, ' ');
   if (!q) return;
+  // Zoomati su una città: prima si cerca una linea urbana, poi un treno.
+  if (map.getZoom() >= 10 && q.length <= 12) {
+    try {
+      if (await searchLine(q)) return;
+    } catch {}
+  }
+  if (lineFilter) clearLine();
   const num = q.replace(/\D/g, '');
   const t =
     trains.find((x) => x.label.toUpperCase() === q) ||

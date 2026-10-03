@@ -111,6 +111,71 @@ export class GtfsStatic {
     return { rname, dest: t?.[2] || '', rcolor: r?.color || null, shape: t?.[1], mode };
   }
 
+  /**
+   * Linea cercata per nome ("64", "tram 8", "n11", "A", "M1"): percorso principale per ogni
+   * destinazione, colore e tipo di mezzo. null se la linea non esiste in questa città.
+   */
+  line(q) {
+    if (!this.ready) return null;
+    const norm = (s) => String(s).toLowerCase().replace(/\s+/g, '');
+    const raw = norm(q);
+    const word = raw.match(/^(linea|bus|autobus|tram|filobus|metro|metropolitana)/)?.[1];
+    const want = { bus: 'bus', autobus: 'bus', tram: 'tram', filobus: 'filobus', metro: 'metro', metropolitana: 'metro' }[word] || null;
+    const key = word ? raw.slice(word.length) : raw;
+    if (!key) return null;
+    this.lineCache ||= new Map();
+    const ck = `${want}|${key}`;
+    if (this.lineCache.has(ck)) return this.lineCache.get(ck);
+    // Metro col nome che usa la gente: a Roma "A" (nel GTFS "MEA"), a Milano "M1" (nel GTFS "1").
+    const display = (r, mode) => (mode !== 'metro' ? r.short : this.feed.id === 'roma' ? r.short.replace(/^ME/i, '') : /^\d$/.test(r.short) ? 'M' + r.short : r.short);
+    let cand = [];
+    for (const [id, r] of this.routes) {
+      const mode = this.info(undefined, id).mode;
+      const direct = norm(r.short) === key;
+      const alias = mode === 'metro' && norm(display(r, mode)) === key;
+      if ((direct || alias) && (!want || want === mode)) cand.push({ id, mode, direct, alias });
+    }
+    // "1" a Milano è il tram 1, non la M1 (per quella si scrive M1 o "metro 1").
+    if (!want && cand.some((c) => c.mode !== 'metro')) cand = cand.filter((c) => c.mode !== 'metro' || c.alias);
+    if (cand.length) {
+      const first = cand[0].mode;
+      cand = cand.filter((c) => c.mode === first);
+    }
+    const ids = cand.map((c) => c.id);
+    let res = null;
+    if (ids.length) {
+      const want = new Set(ids);
+      const per = new Map(); // forma → { destinazione, corse }
+      for (const t of this.trips.values()) {
+        if (!want.has(t[0]) || !t[1]) continue;
+        let e = per.get(t[1]);
+        if (!e) per.set(t[1], (e = { head: t[2], n: 0 }));
+        e.n++;
+      }
+      // Per ogni destinazione la forma con più corse (le varianti rare si tralasciano).
+      const byHead = new Map();
+      for (const [shape, e] of per) {
+        const cur = byHead.get(e.head);
+        if ((!cur || e.n > cur.n) && this.shapes.has(shape)) byHead.set(e.head, { shape, ...e });
+      }
+      const dirs = [...byHead.values()]
+        .sort((a, b) => b.n - a.n)
+        .slice(0, 6)
+        .map((e) => {
+          const f = this.shapes.get(e.shape);
+          const pts = [];
+          for (let i = 0; i < f.length; i += 2) pts.push([f[i], f[i + 1]]);
+          return { headsign: e.head, coords: simplify(pts, 6) };
+        });
+      const r = this.routes.get(ids[0]);
+      const mode = cand[0].mode;
+      res = { feed: this.feed.id, routeIds: ids, name: display(r, mode), short: r.short, long: r.long, color: r.color, mode, dirs };
+    }
+    if (this.lineCache.size > 200) this.lineCache.clear();
+    this.lineCache.set(ck, res);
+    return res;
+  }
+
   /** Forma completa della corsa (coordinate semplificate) o null. */
   route(tripId, routeId) {
     if (!this.ready) return null;
