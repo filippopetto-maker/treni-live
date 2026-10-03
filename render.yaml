@@ -6,6 +6,5 @@ services:
     plan: free
     region: frankfurt
     healthCheckPath: /healthz
-    envVars:
-      - key: TRENI_PASSWORD
-        sync: false # la scegli tu nella pagina di Render
+    # Per proteggere la mappa con una password: aggiungi la variabile TRENI_PASSWORD
+    # nella pagina del servizio su Render (Environment). Senza, la mappa è aperta.
