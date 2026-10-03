@@ -186,7 +186,8 @@ export class GtfsNetwork {
     if (!zipStat) throw new Error(`GTFS ${this.id} non ancora scaricato`);
     try {
       const meta = JSON.parse(await fs.readFile(path.join(this.dir, 'net-info.json'), 'utf8'));
-      if (meta.version === CACHE_VERSION && meta.zipMtime === zipStat.mtimeMs) return;
+      // Al secondo: le immagini Docker conservano le date dei file senza i millisecondi.
+      if (meta.version === CACHE_VERSION && Math.floor(meta.zipMtime / 1000) === Math.floor(zipStat.mtimeMs / 1000)) return;
     } catch {}
     await this.buildCache(zip, zipStat.mtimeMs);
     globalThis.gc?.(); // libera gli array di lavoro prima di caricare la cache
