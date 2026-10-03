@@ -295,3 +295,56 @@ html, body { margin: 0; height: 100%; }
 @media (max-width: 700px) and (prefers-color-scheme: dark) {
   #panel { --solid: #181b22; }
 }
+
+/* ---------- Guida passo passo ---------- */
+.guide-switches { margin: 10px 0 4px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 8px; }
+.sw { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.sw input { position: absolute; opacity: 0; pointer-events: none; }
+.sl { flex: none; width: 44px; height: 26px; border-radius: 13px; background: var(--line); position: relative; transition: background .2s; }
+.sl::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .2s; }
+.sw input:checked + .sl { background: var(--ok); }
+.sw input:checked + .sl::after { transform: translateX(18px); }
+.sw input:focus-visible + .sl { outline: 2px solid var(--ic); outline-offset: 2px; }
+.sw-t b { display: block; font-size: 13px; }
+.sw-t small { color: var(--muted); font-size: 11px; }
+#guideNote { margin: 0; line-height: 1.4; }
+#guideNote:empty { display: none; }
+.g-start {
+  width: 100%; margin: 8px 0 2px; padding: 11px; border: 0; border-radius: 9px; cursor: pointer;
+  background: var(--ok); color: #fff; font-size: 15px; font-weight: 700;
+}
+
+#guide {
+  position: absolute; z-index: 4; left: 50%; transform: translateX(-50%); top: 54px;
+  width: min(460px, calc(100vw - 16px)); background: #1d2330; color: #fff; border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.35); padding: 12px 12px 10px;
+}
+#guide.flash { animation: gflash 1.2s ease 2; }
+@keyframes gflash { 30% { box-shadow: 0 0 0 4px #f0a202, 0 8px 28px rgba(0,0,0,.35); } }
+.g-main { display: flex; gap: 10px; align-items: flex-start; }
+.g-ico { font-size: 28px; line-height: 1; flex: none; }
+.g-txt { flex: 1; min-width: 0; }
+#gTitle { font-size: 17px; font-weight: 700; line-height: 1.25; }
+#gSub { font-size: 13px; opacity: .85; margin-top: 3px; line-height: 1.35; }
+#gWarn { font-size: 13px; color: #f0a202; font-weight: 600; margin-top: 3px; }
+#gWarn:empty { display: none; }
+.g-push { flex: none; font-size: 14px; }
+.g-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.g-actions button {
+  flex: 1 1 auto; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); color: #fff;
+  border-radius: 9px; padding: 9px 8px; font-size: 14px; cursor: pointer; min-height: 40px;
+}
+#gBoard { background: var(--ok); border-color: var(--ok); font-weight: 700; }
+#gEnd { flex: 0 0 auto; }
+.me-dot { width: 18px; height: 18px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(26,115,232,.25), 0 1px 4px rgba(0,0,0,.4); }
+.me-dot.weak { background: #8a93a5; box-shadow: 0 0 0 6px rgba(138,147,165,.25); }
+
+@media (max-width: 700px) {
+  #guide { top: calc(46px + env(safe-area-inset-top)); }
+  body.guiding #panel:not(.collapsed) { max-height: 45vh; }
+}
+/* App installata su iPhone: la barra di stato è sopra la pagina. */
+@media (display-mode: standalone) {
+  #ticker { top: calc(8px + env(safe-area-inset-top)); }
+  .maplibregl-ctrl-top-right { top: calc(40px + env(safe-area-inset-top)); }
+}

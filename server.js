@@ -20,6 +20,8 @@ import { ScheduledMetro } from './src/scheduled.js';
 import { MetroStatus } from './src/metro-status.js';
 import { NewsService } from './src/news.js';
 import { AstralNet } from './src/astral.js';
+import { WebPush } from './src/push.js';
+import { GuideService, liveForLeg } from './src/guide.js';
 import { log, activity } from './src/util.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +82,7 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json',
 };
 
 function send(req, res, status, body, type = 'application/json; charset=utf-8') {
@@ -111,6 +114,33 @@ function authorized(req) {
 function findTrain(id) {
   const [src, key] = [id.slice(0, id.indexOf(':')), id.slice(id.indexOf(':') + 1)];
   return src === 'vt' ? vt.trains.get(key) : src === 'italo' ? italo.trains.get(key) : null;
+}
+
+// Guida passo passo: notifiche push che seguono il mezzo.
+const webPush = new WebPush({ dataDir: path.join(ROOT, 'data') });
+const guide = new GuideService({ push: webPush, transit, findTrain });
+
+/** Corpo JSON di una richiesta POST (massimo 1 MB). */
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > 1_000_000) {
+        reject(new Error('richiesta troppo grande'));
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+      } catch {
+        reject(new Error('JSON non valido'));
+      }
+    });
+    req.on('error', reject);
+  });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -156,6 +186,7 @@ const server = http.createServer(async (req, res) => {
         binari: rail.stats(),
         corseFantasma: Object.fromEntries([...(planner.ghostCache || new Map())].map(([k, v]) => [k, v.set.size])),
         feeds: transit.list(),
+        guida: guide.stats(),
       });
     }
     if (url.pathname === '/api/paths') {
@@ -215,6 +246,28 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/geocode') {
       return send(req, res, 200, await planner.geocode(url.searchParams.get('q'), ll(url.searchParams.get('near'))));
+    }
+
+    if (url.pathname === '/api/push/key') {
+      return send(req, res, 200, { key: webPush.publicKey });
+    }
+    if (url.pathname === '/api/guide/start' && req.method === 'POST') {
+      activity.touch();
+      try {
+        return send(req, res, 200, await guide.start(await readJson(req)));
+      } catch (e) {
+        return send(req, res, 400, { error: e.message });
+      }
+    }
+    if (url.pathname === '/api/guide/stop' && req.method === 'POST') {
+      const b = await readJson(req).catch(() => ({}));
+      return send(req, res, 200, { ok: guide.stop(String(b.id || '')) });
+    }
+    if (url.pathname === '/api/guide/live') {
+      activity.touch();
+      const q = url.searchParams;
+      const leg = { feed: q.get('feed') || undefined, tripId: q.get('trip') || undefined, trainId: q.get('train') || undefined };
+      return send(req, res, 200, await liveForLeg(leg, { transit, findTrain }));
     }
 
     if (url.pathname === '/api/transit') {

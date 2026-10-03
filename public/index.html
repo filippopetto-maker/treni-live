@@ -4,6 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#1d2330" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Treni Live" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Treni Live Italia</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
   <link rel="stylesheet" href="style.css" />
@@ -14,6 +21,21 @@
   <div id="ticker" aria-label="Notizie sulla circolazione">
     <span class="tk-label">INFO<span id="tkScope">Italia</span></span>
     <div class="tk-view"><div class="tk-track" id="tkTrack"><div class="tk-run"><span class="tk-item">Carico le notizie…</span></div></div></div>
+  </div>
+
+  <div id="guide" class="hidden" role="status" aria-live="polite">
+    <div class="g-main">
+      <span id="gIco" class="g-ico">🚶</span>
+      <div class="g-txt"><div id="gTitle"></div><div id="gSub"></div><div id="gWarn"></div></div>
+      <span id="gPush" class="g-push" title="Notifiche attive"></span>
+    </div>
+    <div class="g-actions">
+      <button id="gVoice" type="button" class="hidden">🔊 Attiva voce</button>
+      <button id="gBoard" type="button">Sono salito</button>
+      <button id="gFollow" type="button" class="hidden">◎ Seguimi</button>
+      <button id="gReplan" type="button">Ricalcola</button>
+      <button id="gEnd" type="button">Termina</button>
+    </div>
   </div>
 
   <aside id="panel">
@@ -49,6 +71,11 @@
           <input id="navTime" class="hidden" type="datetime-local" />
           <button id="navClear" type="button">Azzera</button>
         </div>
+      </div>
+      <div class="guide-switches">
+        <label class="sw"><input type="checkbox" id="swGuide" /><span class="sl" aria-hidden="true"></span><span class="sw-t"><b>🧭 Guida passo passo</b><small>Ti segue col GPS, schermo acceso, avvisi a voce</small></span></label>
+        <label class="sw"><input type="checkbox" id="swPush" /><span class="sl" aria-hidden="true"></span><span class="sw-t"><b>🔔 Avvisi a schermo spento</b><small>Notifiche: arriva il mezzo, prossima fermata, scendi</small></span></label>
+        <p id="guideNote" class="muted"></p>
       </div>
       <p id="navMsg" class="muted">Roma e Milano: bus, tram, metro e treni. Tasto destro (dal telefono: tieni premuto) sulla mappa per scegliere un punto; zoomando vedi le fermate con le prossime partenze.</p>
       <ol id="navResults"></ol>
@@ -90,5 +117,7 @@
   <script src="app.js"></script>
   <script src="nav.js"></script>
   <script src="ticker.js"></script>
+  <script src="guide-core.js"></script>
+  <script src="guide.js"></script>
 </body>
 </html>

@@ -148,3 +148,19 @@ oppure tasto destro sulla mappa → "Parti da qui" / "Arriva qui".
 - Il servizio gratuito si addormenta dopo 15 minuti senza visite: un controllo ogni 5 minuti su `/healthz`
   (es. UptimeRobot, gratuito) lo tiene sveglio; senza visitatori il server resta in modalità risparmio.
 - Aggiornare i dati in `seed/`: `zsh deploy/aggiorna-seed.sh`, poi commit e push.
+
+
+## Guida passo passo (telefono)
+
+Nella scheda **Percorso** ci sono due interruttori:
+
+- **Guida passo passo**: la mappa ti segue col GPS, lo schermo resta acceso e una scheda in alto dice cosa fare
+  (cammina fino a…, aspetta il 64 tra 3 min, a bordo: 4 fermate, scendi alla prossima). Avvisi a voce e,
+  su Android, vibrazione. Senza GPS (metro sotterranea) va a orario, corretto con i ritardi comunicati.
+- **Avvisi a schermo spento**: notifiche push dal server, che segue il mezzo (posizione live dei bus di Roma,
+  ritardi ViaggiaTreno, orari della metro): "arriva", "prossima fermata", "scendi". Su iPhone funzionano solo
+  con il sito aggiunto alla schermata Home (Condividi → Aggiungi alla schermata Home) e aperto da lì.
+
+Scelto un percorso, tocca **▶ Inizia il viaggio**. Le chiavi delle notifiche (VAPID) si creano da sole in
+`data/vapid.json`; per tenerle fisse tra un aggiornamento e l'altro si possono mettere nelle variabili
+`VAPID_PUBLIC` e `VAPID_PRIVATE`.

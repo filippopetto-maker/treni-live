@@ -186,13 +186,13 @@ function renderJourneys() {
         <div class="jr-top"><b>${fmtTime(j.dep)} – ${fmtTime(j.arr)}</b><span>${j.min} min</span></div>
         <div class="chips">${parts.join('<i class="sep">›</i>')}</div>
         <div class="jr-sub">${anyLive ? '<i class="pulse"></i>' : ''}${leaveIn > 0 ? `esci tra ${leaveIn} min · ` : ''}${sub.join(' · ')}</div>
-        ${i === nav.active ? steps(j) : ''}
+        ${i === nav.active ? (typeof guideStartHtml === 'function' ? guideStartHtml() : '') + steps(j) : ''}
       </li>`;
     })
     .join('');
   document.querySelectorAll('#navResults .jr').forEach((li) =>
     li.addEventListener('click', (e) => {
-      if (e.target.closest('.steps')) return;
+      if (e.target.closest('.steps, .g-start')) return;
       selectJourney(+li.dataset.i);
     })
   );
