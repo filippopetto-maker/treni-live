@@ -7,6 +7,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { loadStations } from './src/stations.js';
 import { ViaggiaTrenoTracker } from './src/viaggiatreno.js';
 import { ItaloTracker } from './src/italo.js';
@@ -22,6 +23,21 @@ import { AstralNet } from './src/astral.js';
 import { log, activity } from './src/util.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+// Diagnostica per server piccoli: quanta CPU usa il processo e quanto resta bloccato il ciclo eventi.
+const loopDelay = monitorEventLoopDelay({ resolution: 50 });
+loopDelay.enable();
+const cpuStat = { at: Date.now(), usage: process.cpuUsage(), pct: 0, lagP99: 0, lagMax: 0 };
+setInterval(() => {
+  const now = Date.now();
+  const u = process.cpuUsage(cpuStat.usage);
+  cpuStat.pct = Math.round(((u.user + u.system) / 1000 / (now - cpuStat.at)) * 100);
+  cpuStat.lagP99 = Math.round(loopDelay.percentile(99) / 1e6);
+  cpuStat.lagMax = Math.round(loopDelay.max / 1e6);
+  loopDelay.reset();
+  cpuStat.at = now;
+  cpuStat.usage = process.cpuUsage();
+}, 60_000).unref();
+
 const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || '127.0.0.1';
 
@@ -135,6 +151,7 @@ const server = http.createServer(async (req, res) => {
         modalita: activity.mode,
         viaggiatreno: vt.stats(),
         italo: italo.stats(),
+        cpu: { percentoUltimoMinuto: cpuStat.pct, bloccoMsP99: cpuStat.lagP99, bloccoMsMax: cpuStat.lagMax },
         memoriaMB: Object.fromEntries(Object.entries(process.memoryUsage()).map(([k, v]) => [k, Math.round(v / 1e6)])),
         binari: rail.stats(),
         corseFantasma: Object.fromEntries([...(planner.ghostCache || new Map())].map(([k, v]) => [k, v.set.size])),
