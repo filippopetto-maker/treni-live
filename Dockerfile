@@ -17,6 +17,6 @@ RUN mkdir -p data \
 
 USER node
 # PORT lo imposta l'hosting (Render usa 10000). Con 512 MB di RAM il navigatore tiene una città alla volta.
-ENV HOST=0.0.0.0 PORT=8787 TZ=Europe/Rome NAV_MAX_NETS=1 NAV_UNLOAD_MIN=10 NODE_OPTIONS="--max-old-space-size=380 --expose-gc"
+ENV HOST=0.0.0.0 PORT=8787 TZ=Europe/Rome NAV_MAX_NETS=1 NAV_UNLOAD_MIN=10 NODE_OPTIONS="--max-old-space-size=280 --expose-gc"
 EXPOSE 8787
 CMD ["node", "server.js"]
