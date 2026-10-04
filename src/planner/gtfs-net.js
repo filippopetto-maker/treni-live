@@ -176,6 +176,52 @@ export class GtfsNetwork {
     return this.ensureDays([ymd]);
   }
 
+  /**
+   * Fine validità dichiarata nel feed_info.txt del GTFS (YYYYMMDD o null).
+   * ATM la indica separata: surface_end_date (bus/tram) e mm_end_date (metro).
+   */
+  async readFeedInfo() {
+    const zip = path.join(this.dir, 'gtfs.zip');
+    const st = await fs.stat(zip).catch(() => null);
+    if (this.feedInfo && this.feedInfo.mtime === st?.mtimeMs) return this.feedInfo;
+    let fi = {};
+    try {
+      const { stdout } = await run('unzip', ['-p', zip, 'feed_info.txt'], { maxBuffer: 1 << 20 });
+      const [head, row] = stdout.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+      const cells = (l) => l.split(',').map((c) => c.replace(/^"|"$/g, '').trim());
+      const h = cells(head);
+      const r = cells(row || '');
+      h.forEach((k, i) => (fi[k] = r[i] || ''));
+    } catch {}
+    const d = (v) => (/^\d{8}$/.test(v || '') ? v : null);
+    this.feedInfo = {
+      mtime: st?.mtimeMs,
+      version: fi.feed_version || null,
+      start: d(fi.feed_start_date),
+      surfaceEnd: d(fi.surface_end_date) || d(fi.feed_end_date),
+      metroEnd: d(fi.mm_end_date) || d(fi.feed_end_date),
+    };
+    return this.feedInfo;
+  }
+
+  /** Primo giorno senza dati veri (il minimo tra fine dichiarata e fine del calendario). */
+  dataEnd() {
+    const ends = [this.feedInfo?.surfaceEnd, this.feedInfo?.metroEnd, this.calendarEnd()].filter(Boolean);
+    return ends.length ? ends.sort()[0] : null;
+  }
+
+  /**
+   * Giorno da usare al posto di ymd quando i dati sono scaduti: lo stesso giorno della settimana
+   * nell'ultima settimana valida (null se ymd è coperto, o se non c'è una settimana valida).
+   */
+  proxyDay(ymd, end) {
+    if (!end || ymd <= end) return null;
+    let d = ymd;
+    while (d > end) d = shiftYmd(d, -7);
+    const start = this.feedInfo?.start;
+    return start && d < start ? null : d;
+  }
+
   /** Ultimo giorno coperto dal GTFS in uso (YYYYMMDD), o null. */
   calendarEnd() {
     let end = null;
@@ -207,16 +253,18 @@ export class GtfsNetwork {
       this.fullIds = meta.trips;
       this.calendar = meta.calendar;
       this.calDates = meta.calDates;
-      // Servizio (calendario) di ogni corsa, dal GTFS già indicizzato per la mappa.
+      // Servizio (calendario) e tipo (metro o superficie) di ogni corsa, dal GTFS indicizzato per la mappa.
       const st = this.statics;
       this.fullService = this.fullIds.map((t) => st.trips.get(t)?.[3] ?? '');
+      this.fullMetro = Uint8Array.from(this.fullIds, (t) => (modeOf(st.routes.get(st.trips.get(t)?.[0])?.type) === 'metro' ? 1 : 0));
+      await this.readFeedInfo();
       if (!this.fpOff) this.buildFootpaths();
     }
   }
 
   dropFull() {
     this.tripOff = this.stIdx = this.stArr = this.stDep = null;
-    this.fullIds = this.fullService = null;
+    this.fullIds = this.fullService = this.fullMetro = null;
   }
 
   /**
@@ -509,10 +557,14 @@ export class GtfsNetwork {
 
   /** Estrazione di un giorno dalle tabelle complete (indici di corsa "lunghi", poi compattati). */
   dayFull(ymd) {
-    const act = this.activeServices(ymd);
+    // Dati scaduti (es. ATM in ritardo con la pubblicazione): orari della settimana precedente.
+    const surf = this.proxyDay(ymd, this.feedInfo?.surfaceEnd);
+    const metro = this.proxyDay(ymd, this.feedInfo?.metroEnd);
+    const actS = this.activeServices(surf || ymd);
+    const actM = metro === surf ? actS : this.activeServices(metro || ymd);
     const groups = new Map();
     for (let t = 0; t < this.fullIds.length; t++) {
-      if (!act.has(this.fullService[t])) continue;
+      if (!(this.fullMetro[t] ? actM : actS).has(this.fullService[t])) continue;
       const a = this.tripOff[t];
       const b = this.tripOff[t + 1];
       if (b - a < 2) continue;
@@ -548,8 +600,15 @@ export class GtfsNetwork {
         spPos[fill[s]++] = pos;
       });
     });
-    return { ymd, patterns, spOff: cnt, spP, spPos };
+    const estimated = surf || metro ? { surface: surf, metro } : null;
+    if (estimated) log(`Navigatore: ${this.id} ${ymd} con orari stimati (superficie da ${surf || '-'}, metro da ${metro || '-'})`);
+    return { ymd, patterns, spOff: cnt, spP, spPos, estimated };
   }
+}
+
+function shiftYmd(ymd, days) {
+  const d = new Date(Date.UTC(+ymd.slice(0, 4), +ymd.slice(4, 6) - 1, +ymd.slice(6, 8)) + days * 86400_000);
+  return d.toISOString().slice(0, 10).replaceAll('-', '');
 }
 
 export function titleCase(s) {

@@ -11,6 +11,7 @@ const chip = (l) =>
   `<span class="chip" style="background:${esc(l.color || '#666')}">${ICONS[l.mode] || '🚌'} ${esc(l.line)}</span>`;
 
 function liveText(l) {
+  if (l.estimated) return '<span class="sched">orario stimato (dati ATM non aggiornati)</span>';
   if (!l.live || l.delay == null) return `<span class="sched">orario programmato${l.mode === 'metro' ? ' (stato linea controllato)' : ''}</span>`;
   const m = Math.round(l.delay / 60);
   if (m >= 1) return `<span class="live late">live · +${m}′</span>`;
@@ -301,7 +302,7 @@ async function showStop(p, lngLat) {
     try {
       const d = await (await fetch(`/api/stop/arrivals?id=${encodeURIComponent(p.id)}`)).json();
       const el = pop.getElement()?.querySelector('.deps');
-      if (el) el.innerHTML = departuresHtml(d.departures || []);
+      if (el) el.innerHTML = (d.note ? `<div class="st-alert est-note">⚠ ${esc(d.note)}</div>` : '') + departuresHtml(d.departures || []);
     } catch {}
   };
   refresh();

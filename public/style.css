@@ -369,3 +369,6 @@ html, body { margin: 0; height: 100%; }
 #qSugg { left: 0; }
 #qSugg { background: #fff; color: #1d2330; }
 @media (prefers-color-scheme: dark) { #qSugg { background: #181b22; color: #eef0f4; } }
+
+.est-note { font-weight: 500; margin: 0 0 6px; line-height: 1.35; }
+#navMsg:not(:empty) { line-height: 1.4; }

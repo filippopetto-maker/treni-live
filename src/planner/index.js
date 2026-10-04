@@ -133,7 +133,7 @@ export class Planner {
         const net = this.net(f.id);
         if (!st || !net) throw new Error('orari della città non disponibili');
         const today = localTime(Date.now()).ymd;
-        const end = net.calendarEnd?.() || null;
+        const end = net.dataEnd?.() || net.calendarEnd?.() || null;
         const expiring = end && end < shiftYmd(today, 5);
         let changed = false;
         try {
@@ -199,6 +199,8 @@ export class Planner {
         corse: n.tripIds?.length || 0,
         preparataAlle: n.preparedAt ? new Date(n.preparedAt).toISOString() : null,
         orariFinoAl: n.calendarEnd?.() || null,
+        datiDichiarati: n.feedInfo ? { versione: n.feedInfo.version, superficieFinoAl: n.feedInfo.surfaceEnd, metroFinoAl: n.feedInfo.metroEnd } : null,
+        giorniStimati: [...n.dates.values()].filter((d) => d.estimated).map((d) => `${d.ymd} (da ${d.estimated.surface || d.estimated.metro})`),
       };
     }
     return out;
@@ -482,7 +484,19 @@ export class Planner {
       .filter((j, _, all) => j.dep <= timeMs + 90 * 60_000 || all.every((o) => o.dep > timeMs + 90 * 60_000))
       .sort((a, b) => a.arr - b.arr || a.rides - b.rides);
     log(`Navigatore: ${kept.length} soluzioni in ${Date.now() - t0ms} ms`);
-    return { journeys: kept.slice(0, 6) };
+    const notes = views.filter((v) => v.kind === 'city').map((v) => this.estimatedNote(v.net, v.sets.map((x) => x.d.estimated))).filter(Boolean);
+    return notes.length ? { journeys: kept.slice(0, 6), note: notes.join(' ') } : { journeys: kept.slice(0, 6) };
+  }
+
+  /** Avviso per le città i cui orari pubblicati sono scaduti (si usano quelli della settimana prima). */
+  estimatedNote(net, days) {
+    const est = days.filter(Boolean);
+    if (!est.length) return null;
+    const fi = net.feedInfo || {};
+    const f = (y) => (y ? `${+y.slice(6, 8)}/${+y.slice(4, 6)}` : '');
+    const city = net.id === 'milano' ? 'Milano' : net.id === 'roma' ? 'Roma' : net.id;
+    const what = [est.some((e) => e.surface) && `bus e tram scaduti il ${f(fi.surfaceEnd)}`, est.some((e) => e.metro) && `metro scaduta il ${f(fi.metroEnd)}`].filter(Boolean).join(', ');
+    return `${city}: gli orari pubblicati da ${net.id === 'milano' ? 'ATM/Comune' : "l'azienda"} non sono aggiornati (${what}). Uso quelli della settimana precedente: possono esserci differenze.`;
   }
 
   walkLeg(a, b, dep, arr) {
@@ -589,6 +603,7 @@ export class Planner {
       const t = P.trips[l.j];
       const info = v.net.tripInfo(t);
       const live = !!(l.live && v.net.tripLive?.[t]);
+      const est = v.sets[l.set]?.d?.estimated;
       Object.assign(leg, {
         mode: info.mode,
         ...lineInfo(v.net.id, info),
@@ -599,6 +614,7 @@ export class Planner {
         tripId: info.tripId,
         alert: this.metroAlert(v.net.id, info)?.text,
         coords: this.shapeCoords(v.net, info.shape, stops),
+        estimated: !!(est && (info.mode === 'metro' ? est.metro : est.surface)) || undefined,
       });
     }
     return leg;
@@ -680,6 +696,7 @@ export class Planner {
     const lt = localTime(now);
     const out = [];
     let stop;
+    let note = null;
     if (src === 'astral') {
       if (!this.astral) return null;
       await this.astral.refresh();
@@ -742,6 +759,7 @@ export class Planner {
       const ghosts = await this.ghostTrips(net, lt).catch(() => new Set());
       const sets = [{ d: net.day(lt.ymd), shift: 0 }];
       if (lt.sec < 4 * 3600) sets.push({ d: net.day(prevYmd(lt.ymd)), shift: -86400 });
+      note = this.estimatedNote(net, sets.map((x) => x.d.estimated));
       for (const { d, shift } of sets) {
         for (let e = d.spOff[s]; e < d.spOff[s + 1]; e++) {
           const P = d.patterns[d.spP[e]];
@@ -763,6 +781,7 @@ export class Planner {
               t, mode: info.mode, headsign: info.headsign, ...lineInfo(net.id, info),
               delay: live ? delay : null, live, feed: net.id, tripId: info.tripId, alert: alert?.text,
               ghost: ghosts.has(ti) || undefined,
+              estimated: !!(d.estimated && (info.mode === 'metro' ? d.estimated.metro : d.estimated.surface)) || undefined,
             });
           }
         }
@@ -775,7 +794,7 @@ export class Planner {
       const k = `${d.line}|${d.headsign}|${Math.round(d.t / 60000)}`;
       return !seen.has(k) && seen.add(k);
     });
-    return { stop: { name: stop.name, lat: stop.lat, lon: stop.lon }, now, departures: deps.slice(0, 60) };
+    return { stop: { name: stop.name, lat: stop.lat, lon: stop.lon }, now, departures: deps.slice(0, 60), ...(note ? { note } : {}) };
   }
 
   // ---------- ricerca luoghi ----------
