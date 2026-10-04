@@ -363,3 +363,9 @@ html, body { margin: 0; height: 100%; }
   body.guiding #lineChip { display: none; }
 }
 @media (max-width: 700px) and (prefers-color-scheme: dark) { #lineChip { background: #181b22; color: #eef0f4; } }
+
+/* Suggerimenti stazioni nella ricerca */
+#search { position: relative; }
+#qSugg { left: 0; }
+#qSugg { background: #fff; color: #1d2330; }
+@media (prefers-color-scheme: dark) { #qSugg { background: #181b22; color: #eef0f4; } }

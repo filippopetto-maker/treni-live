@@ -740,9 +740,51 @@ async function searchLine(q) {
   return true;
 }
 
+// ---------- stazioni (treni ovunque; metro, Metromare e Roma–Viterbo quando si è in città) ----------
+
+async function findStations(q) {
+  const c = map.getCenter();
+  const r = await fetch(`/api/stations?q=${encodeURIComponent(q)}&near=${c.lat.toFixed(4)},${c.lng.toFixed(4)}&zoom=${map.getZoom().toFixed(1)}`);
+  return r.ok ? r.json() : [];
+}
+
+function goStation(s) {
+  $('#qSugg').innerHTML = '';
+  if (mobile) {
+    $('#q').blur();
+    setPanel(false);
+  }
+  if (lineFilter) clearLine();
+  map.flyTo({ center: [s.lon, s.lat], zoom: Math.max(map.getZoom(), s.metro ? 16 : 15), duration: 900 });
+  map.once('moveend', () => showStop({ id: s.id, name: s.name, rail: true }, [s.lon, s.lat]));
+}
+
+// Suggerimenti mentre si scrive il nome di una stazione (non per numeri di treno o linee).
+let qTimer = null;
+$('#q').addEventListener('input', () => {
+  clearTimeout(qTimer);
+  const q = $('#q').value.trim();
+  const list = $('#qSugg');
+  if (q.length < 3 || /^\d/.test(q)) return (list.innerHTML = '');
+  qTimer = setTimeout(async () => {
+    const res = await findStations(q).catch(() => []);
+    if ($('#q').value.trim() !== q) return;
+    list.innerHTML = res
+      .map((s, i) => `<li data-i="${i}"><span class="ico">${s.metro ? 'Ⓜ️' : '🚉'}</span><span><b>${esc(s.name)}</b><small>${esc(s.sub || '')}</small></span></li>`)
+      .join('');
+    list.querySelectorAll('li').forEach((li) =>
+      li.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        goStation(res[+li.dataset.i]);
+      })
+    );
+  }, 250);
+});
+$('#q').addEventListener('blur', () => setTimeout(() => ($('#qSugg').innerHTML = ''), 150));
+
 // Il suggerimento nella casella cambia quando si è dentro una città.
 function updateSearchHint() {
-  $('#q').placeholder = map.getZoom() >= 10 ? 'Cerca treno o linea (es. 64, tram 8, 9651)' : 'Cerca treno (es. 9651, Italo 8981)';
+  $('#q').placeholder = map.getZoom() >= 10 ? 'Cerca treno, linea o stazione (es. 64, Termini)' : 'Cerca treno o stazione (es. 9651, Bologna)';
 }
 map.on('zoomend', updateSearchHint);
 $('#q').addEventListener('input', () => !$('#q').value && lineFilter && clearLine());
@@ -763,7 +805,11 @@ $('#search').addEventListener('submit', async (e) => {
     trains.find((x) => x.label.toUpperCase() === q) ||
     trains.find((x) => num && x.label.replace(/\D/g, '') === num);
   if (!t) {
-    $('#hint').textContent = `Nessun treno "${q}" in circolazione sulla mappa adesso.`;
+    try {
+      const list = await findStations($('#q').value.trim());
+      if (list.length) return goStation(list[0]);
+    } catch {}
+    $('#hint').textContent = `Nessun treno, linea o stazione "${q}" trovati.`;
     return;
   }
   const pos = position(t, Date.now() + clockOffset);

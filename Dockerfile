@@ -17,8 +17,8 @@ RUN mkdir -p data \
  && chown -R node:node /app
 
 USER node
-# PORT lo imposta l'hosting (Render usa 10000). Con 512 MB di RAM il navigatore tiene una città alla volta;
-# la tiene in memoria 3 ore (ricaricarla su 0,1 CPU costa decine di secondi).
-ENV HOST=0.0.0.0 PORT=8787 TZ=Europe/Rome NAV_MAX_NETS=1 NAV_UNLOAD_MIN=180 GTFS_MAX_AGE_DAYS=21 NODE_OPTIONS="--max-old-space-size=280 --expose-gc"
+# PORT lo imposta l'hosting (Render usa 10000). Il navigatore tiene in memoria Roma e Milano,
+# solo le corse di ieri/oggi/domani; ogni notte alle 3 controlla orari nuovi e prepara il giorno dopo.
+ENV HOST=0.0.0.0 PORT=8787 TZ=Europe/Rome GTFS_MAX_AGE_DAYS=21 NODE_OPTIONS="--max-old-space-size=280 --expose-gc"
 EXPOSE 8787
 CMD ["node", "server.js"]

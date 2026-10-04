@@ -109,7 +109,9 @@ export class GtfsNetwork {
     this.stops = null; // [{ id, name, lat, lon }]
     this.loaded = false;
     this.loading = null;
-    this.dates = new Map(); // "20261002" → strutture per quel giorno
+    this.dates = new Map(); // "20261002" → strutture per quel giorno (solo i giorni preparati)
+    this.preparing = null;
+    this.version = 0;
     this.lastUse = 0;
     this.tripDelay = null; // ritardi in tempo reale per corsa (secondi), se il feed li ha
   }
@@ -124,13 +126,67 @@ export class GtfsNetwork {
     return this.stops;
   }
 
-  /** Carica orari e indici (ci vogliono pochi secondi se la cache è pronta). */
-  async load() {
+  /** Giorni pronti in memoria? */
+  hasDays(ymds) {
+    return this.loaded && ymds.every((y) => this.dates.has(y));
+  }
+
+  /**
+   * Prepara i giorni richiesti (YYYYMMDD) e tiene in memoria solo le loro corse.
+   * Le tabelle complete (net.bin, tutte le settimane del GTFS) si leggono per pochi secondi,
+   * si estraggono i giorni e si liberano: così Roma e Milano stanno insieme in 512 MB.
+   * La lista è quella completa da tenere: i giorni non elencati vengono tolti.
+   */
+  async ensureDays(ymds) {
     this.lastUse = Date.now();
-    if (this.loaded) return this;
-    if (this.loading) return this.loading;
-    this.loading = (async () => {
+    if (this.hasDays(ymds)) return this;
+    while (this.preparing) await this.preparing.catch(() => {});
+    if (this.hasDays(ymds)) return this;
+    const want = [...new Set(ymds)].sort();
+    const t0 = Date.now();
+    this.preparing = (async () => {
       await this.ensureStops();
+      await this.loadFull();
+      const dates = new Map();
+      for (const y of want) dates.set(y, this.dayFull(y));
+      this.compactTo(dates);
+      this.loaded = true;
+      this.preparedAt = Date.now();
+      const n = this.tripIds.length;
+      log(`Navigatore: ${this.id} pronto per ${want.join(', ')} (${n.toLocaleString('it-IT')} corse, ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+      return this;
+    })();
+    try {
+      return await this.preparing;
+    } catch (e) {
+      log(`Navigatore: preparazione di ${this.id} non riuscita: ${e.message}`);
+      throw e;
+    } finally {
+      this.dropFull();
+      this.preparing = null;
+      globalThis.gc?.();
+    }
+  }
+
+  /** Compatibilità: rete pronta per i giorni già in memoria (o per oggi). */
+  async load() {
+    if (this.loaded) return this;
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    return this.ensureDays([ymd]);
+  }
+
+  /** Ultimo giorno coperto dal GTFS in uso (YYYYMMDD), o null. */
+  calendarEnd() {
+    let end = null;
+    for (const c of Object.values(this.calendar || {})) if (!end || c.end > end) end = c.end;
+    for (const c of Object.values(this.calDates || {})) for (const y of c.add) if (!end || y > end) end = y;
+    return end;
+  }
+
+  /** Tabelle complete da net.bin (temporanee). */
+  async loadFull() {
+    {
       const meta = JSON.parse(await fs.readFile(path.join(this.dir, 'net.json'), 'utf8'));
       const buf = await fs.readFile(path.join(this.dir, 'net.bin'));
       const nT = buf.readUInt32LE(4);
@@ -148,36 +204,67 @@ export class GtfsNetwork {
       this.stArr = arr(o, nR);
       o += nR * 4;
       this.stDep = arr(o, nR);
-      this.tripIds = meta.trips;
-      this.tripIndex = new Map(this.tripIds.map((t, i) => [t, i]));
+      this.fullIds = meta.trips;
       this.calendar = meta.calendar;
       this.calDates = meta.calDates;
-      // Linea, servizio e destinazione di ogni corsa, dal GTFS già indicizzato per la mappa.
+      // Servizio (calendario) di ogni corsa, dal GTFS già indicizzato per la mappa.
       const st = this.statics;
-      this.tripService = this.tripIds.map((t) => st.trips.get(t)?.[3] ?? '');
-      this.tripDelay = new Int32Array(this.tripIds.length);
-      this.buildFootpaths();
-      this.loaded = true;
-      this.loading = null;
-      log(`Navigatore: rete ${this.id} in memoria (${this.stops.length} fermate, ${nT.toLocaleString('it-IT')} corse)`);
-      return this;
-    })().catch((e) => {
-      this.loading = null; // si potrà riprovare
-      log(`Navigatore: preparazione di ${this.id} non riuscita: ${e.message}`);
-      throw e;
-    });
-    return this.loading;
+      this.fullService = this.fullIds.map((t) => st.trips.get(t)?.[3] ?? '');
+      if (!this.fpOff) this.buildFootpaths();
+    }
+  }
+
+  dropFull() {
+    this.tripOff = this.stIdx = this.stArr = this.stDep = null;
+    this.fullIds = this.fullService = null;
+  }
+
+  /**
+   * Tiene solo le corse dei giorni estratti e le rinumera da 0: gli indici dei pattern,
+   * dei ritardi e delle corse saltate si riferiscono a questa numerazione compatta.
+   */
+  compactTo(dates) {
+    const old = this.fullIds.length;
+    const map = new Int32Array(old).fill(-1);
+    const ids = [];
+    for (const d of dates.values()) {
+      for (const P of d.patterns) {
+        for (let j = 0; j < P.trips.length; j++) {
+          const t = P.trips[j];
+          if (map[t] < 0) {
+            map[t] = ids.length;
+            ids.push(this.fullIds[t]);
+          }
+          P.trips[j] = map[t];
+        }
+      }
+    }
+    this.tripIds = ids;
+    this.tripIndex = new Map(ids.map((t, i) => [t, i]));
+    this.tripDelay = new Int32Array(ids.length);
+    this.tripLive = null;
+    this.lastTu = null;
+    this.dates = dates;
+    this.version = (this.version || 0) + 1;
   }
 
   unload() {
     if (!this.loaded) return;
     this.loaded = false;
-    this.tripOff = this.stIdx = this.stArr = this.stDep = null;
-    this.tripIds = this.tripIndex = this.tripService = this.tripDelay = this.tripLive = this.lastTu = null;
-    this.dates.clear();
-    // Su server piccoli libera subito la memoria (serve node --expose-gc).
+    this.dropFull();
+    this.tripIds = this.tripIndex = this.tripDelay = this.tripLive = this.lastTu = null;
+    this.dates = new Map();
     globalThis.gc?.();
     log(`Navigatore: rete ${this.id} tolta dalla memoria`);
+  }
+
+  /** Dopo un GTFS nuovo: si riparte da zero (fermate, cambi a piedi, giorni). */
+  reset() {
+    this.unload();
+    this.stops = null;
+    this.grid = null;
+    this.fpOff = this.fpTo = this.fpSec = null;
+    this.version = (this.version || 0) + 1;
   }
 
   async ensureCache() {
@@ -405,11 +492,27 @@ export class GtfsNetwork {
    * (stessa sequenza di fermate) ordinate per orario, e per ogni fermata i pattern che vi passano.
    */
   day(ymd) {
-    if (this.dates.has(ymd)) return this.dates.get(ymd);
+    const d = this.dates.get(ymd);
+    if (d) return d;
+    // Giorno non preparato (chi chiama doveva usare ensureDays): nessuna corsa, niente errori.
+    if (!this.warned?.has(ymd)) {
+      (this.warned ||= new Set()).add(ymd);
+      log(`Navigatore: ${this.id} senza orari per il ${ymd}`);
+    }
+    return this.emptyDay(ymd);
+  }
+
+  emptyDay(ymd) {
+    const N = this.stops?.length || 0;
+    return { ymd, patterns: [], spOff: new Int32Array(N + 1), spP: new Int32Array(0), spPos: new Int32Array(0) };
+  }
+
+  /** Estrazione di un giorno dalle tabelle complete (indici di corsa "lunghi", poi compattati). */
+  dayFull(ymd) {
     const act = this.activeServices(ymd);
     const groups = new Map();
-    for (let t = 0; t < this.tripIds.length; t++) {
-      if (!act.has(this.tripService[t])) continue;
+    for (let t = 0; t < this.fullIds.length; t++) {
+      if (!act.has(this.fullService[t])) continue;
       const a = this.tripOff[t];
       const b = this.tripOff[t + 1];
       if (b - a < 2) continue;
@@ -445,10 +548,7 @@ export class GtfsNetwork {
         spPos[fill[s]++] = pos;
       });
     });
-    const d = { ymd, patterns, spOff: cnt, spP, spPos };
-    this.dates.set(ymd, d);
-    if (this.dates.size > 3) this.dates.delete(this.dates.keys().next().value);
-    return d;
+    return { ymd, patterns, spOff: cnt, spP, spPos };
   }
 }
 

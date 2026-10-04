@@ -13,9 +13,8 @@ const ACCESS_MAX_M = 1500;
 const RAIL_ACCESS_M = 1500;
 const CROSS_M = 400;
 const WALK_ONLY_MAX_M = 2500;
-// Su server piccoli (es. 512 MB): NAV_UNLOAD_MIN=10 e NAV_MAX_NETS=1 tengono in memoria una città alla volta.
-const UNLOAD_AFTER = (Number(process.env.NAV_UNLOAD_MIN) || 30) * 60_000;
-const MAX_NETS = Number(process.env.NAV_MAX_NETS) || 0;
+// Ogni notte alle 3 (ora italiana) si controllano gli orari nuovi e si preparano i giorni.
+const NIGHTLY_AT = process.env.NAV_NIGHTLY_AT || '03:00';
 const TZ = 'Europe/Rome';
 
 // Colori ufficiali delle metropolitane (i GTFS di Roma e Milano non li indicano).
@@ -37,6 +36,11 @@ export function localTime(ms) {
   return { ymd: p.year + p.month + p.day, sec, midnight: ms - sec * 1000 - (ms % 1000) };
 }
 
+const shiftYmd = (ymd, days) => {
+  const d = new Date(Date.UTC(+ymd.slice(0, 4), +ymd.slice(4, 6) - 1, +ymd.slice(6, 8)) + days * 86400_000);
+  return d.toISOString().slice(0, 10).replaceAll('-', '');
+};
+const nextYmd = (ymd) => shiftYmd(ymd, 1);
 const prevYmd = (ymd) => {
   const d = new Date(Date.UTC(+ymd.slice(0, 4), +ymd.slice(4, 6) - 1, +ymd.slice(6, 8)) - 86400_000);
   return d.toISOString().slice(0, 10).replaceAll('-', '');
@@ -65,9 +69,139 @@ export class Planner {
     this.nets = new Map(); // id feed → GtfsNetwork
     this.railNet = null;
     this.crossCache = new Map();
-    setInterval(() => {
-      for (const n of this.nets.values()) if (n.loaded && Date.now() - n.lastUse > UNLOAD_AFTER) n.unload();
-    }, 60_000).unref();
+    this.prep = Promise.resolve(); // una città alla volta legge le tabelle complete (picco di memoria)
+    this.nightlyReport = null;
+    this.scheduleNightly();
+  }
+
+  /** Giorni da tenere pronti: ieri (notturni dopo mezzanotte), oggi, domani. */
+  windowDays(ms = Date.now()) {
+    const today = localTime(ms).ymd;
+    return [prevYmd(today), today, nextYmd(today)];
+  }
+
+  /** Esegue fn quando nessun'altra città sta leggendo le tabelle complete. */
+  serial(fn) {
+    const p = this.prep.then(fn, fn);
+    this.prep = p.catch(() => {});
+    return p;
+  }
+
+  /** Prepara tutte le città (all'avvio, appena gli orari della mappa sono pronti). */
+  async warmup() {
+    for (const f of this.cityFeeds) {
+      const st = this.transit.statics.get(f.id);
+      while (!st?.ready) {
+        if (st?.state?.startsWith('errore')) break;
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+      if (!st?.ready) continue;
+      await this.serial(() => this.net(f.id).ensureDays(this.windowDays())).catch(() => {});
+    }
+  }
+
+  // ---------- rinnovo notturno ----------
+
+  scheduleNightly() {
+    const [h, m] = NIGHTLY_AT.split(':').map(Number);
+    const lt = localTime(Date.now());
+    let wait = (h * 3600 + m * 60 - lt.sec) * 1000;
+    if (wait <= 60_000) wait += 86400_000;
+    clearTimeout(this.nightlyTimer);
+    this.nightlyTimer = setTimeout(async () => {
+      await this.nightly().catch((e) => log('Rinnovo notturno:', e.message));
+      this.scheduleNightly();
+    }, wait);
+    this.nightlyTimer.unref?.();
+    this.nightlyNext = Date.now() + wait;
+  }
+
+  /**
+   * Ogni notte: per ogni città si controlla se il sito pubblica orari nuovi (si scaricano solo
+   * se cambiati o se quelli in uso stanno per scadere), poi si preparano ieri/oggi/domani.
+   * Un errore su una città non ferma l'altra; se il download fallisce restano gli orari vecchi.
+   */
+  async nightly({ forceDownload = false } = {}) {
+    const rep = { inizio: new Date().toISOString(), citta: {} };
+    this.nightlyReport = rep;
+    log('Rinnovo notturno degli orari: inizio');
+    for (const f of this.cityFeeds) {
+      const r = (rep.citta[f.id] = {});
+      const t0 = Date.now();
+      try {
+        const st = this.transit.statics.get(f.id);
+        const net = this.net(f.id);
+        if (!st || !net) throw new Error('orari della città non disponibili');
+        const today = localTime(Date.now()).ymd;
+        const end = net.calendarEnd?.() || null;
+        const expiring = end && end < shiftYmd(today, 5);
+        let changed = false;
+        try {
+          const u = await st.checkUpdate({ force: forceDownload || expiring });
+          r.download = u.changed ? 'orari nuovi scaricati' : u.reason || 'nessuna novità';
+          changed = u.changed;
+        } catch (e) {
+          r.download = 'non riuscito: ' + e.message + ' (restano gli orari in uso)';
+        }
+        if (changed) {
+          // Orari nuovi: la mappa si reindicizza e la rete del navigatore si ricostruisce.
+          await this.serial(async () => {
+            // Per qualche secondo si libera anche l'altra città: la ricostruzione è il momento
+            // di massima memoria (alle 3 di notte nessuno se ne accorge, poi si ripreparano tutte).
+            for (const other of this.nets.values()) if (other !== net) other.unload();
+            net.reset();
+            this.dropCaches(f.id);
+            globalThis.gc?.();
+            await st.reindex();
+            globalThis.gc?.();
+            await net.ensureDays(this.windowDays());
+          });
+        } else {
+          await this.serial(() => net.ensureDays(this.windowDays()));
+        }
+        r.giorni = [...net.dates.keys()];
+        r.corse = net.tripIds?.length || 0;
+        r.orariFinoAl = net.calendarEnd();
+        if (r.orariFinoAl && r.orariFinoAl < shiftYmd(today, 5)) r.avviso = `gli orari pubblicati finiscono il ${r.orariFinoAl}`;
+      } catch (e) {
+        r.errore = e.message;
+      }
+      r.secondi = Math.round((Date.now() - t0) / 1000);
+      log(`Rinnovo notturno ${f.id}: ${JSON.stringify(r)}`);
+    }
+    // Città liberate durante la ricostruzione di un'altra: si ripreparano.
+    for (const f of this.cityFeeds) {
+      const net = this.net(f.id);
+      if (net && this.transit.statics.get(f.id)?.ready && !net.hasDays(this.windowDays())) {
+        await this.serial(() => net.ensureDays(this.windowDays())).catch((e) => (rep.citta[f.id].errore ||= e.message));
+        rep.citta[f.id].giorni = [...net.dates.keys()];
+        rep.citta[f.id].corse = net.tripIds?.length || 0;
+      }
+    }
+    rep.fine = new Date().toISOString();
+    return rep;
+  }
+
+  /** Dati calcolati su una versione precedente della rete. */
+  dropCaches(id) {
+    for (const k of [...this.crossCache.keys()]) if (k.endsWith('>' + id)) this.crossCache.delete(k);
+    this.ghostCache?.delete(id);
+    this.transit.metro?.days?.clear?.();
+  }
+
+  status() {
+    const out = { citta: {}, rinnovoNotturno: this.nightlyReport, prossimoRinnovo: this.nightlyNext ? new Date(this.nightlyNext).toISOString() : null };
+    for (const [id, n] of this.nets) {
+      out.citta[id] = {
+        pronta: n.loaded,
+        inPreparazione: !!n.preparing,
+        giorni: [...n.dates.keys()],
+        corse: n.tripIds?.length || 0,
+        preparataAlle: n.preparedAt ? new Date(n.preparedAt).toISOString() : null,
+        orariFinoAl: n.calendarEnd?.() || null,
+      };
+    }
+    return out;
   }
 
   /** Feed urbani con orari statici (quelli dove il navigatore funziona). */
@@ -87,22 +221,25 @@ export class Planner {
     return n;
   }
 
-  /** Rete urbana pronta all'uso (orari caricati). Errore chiaro se il GTFS è ancora in preparazione. */
-  async readyNet(id) {
+  /**
+   * Rete urbana pronta per i giorni richiesti (oltre a ieri/oggi/domani, sempre in memoria).
+   * Errore chiaro se gli orari sono ancora in preparazione.
+   */
+  async readyNet(id, extraDays = []) {
     const n = this.net(id);
     if (!n) return null;
     if (!n.statics.ready) throw new Error(`orari di ${n.feed.name} ancora in preparazione, riprova tra poco`);
-    if (MAX_NETS && !n.loaded) {
-      // Una città alla volta: se un'altra si sta ancora preparando, si aspetta il proprio turno.
-      if ([...this.nets.values()].some((x) => x !== n && x.loading)) {
-        throw new Error('sto preparando gli orari di un\'altra città, riprova tra un paio di minuti');
-      }
-      const others = [...this.nets.values()].filter((x) => x !== n && x.loaded).sort((a, b) => a.lastUse - b.lastUse);
-      while (others.length >= MAX_NETS) others.shift().unload();
+    const win = this.windowDays();
+    const want = [...new Set([...win, ...extraDays])];
+    if (n.hasDays(want)) {
+      n.lastUse = Date.now();
+      return n;
     }
-    // La prima preparazione degli orari può richiedere minuti su un server lento:
+    // Un giorno fuori da ieri/oggi/domani si aggiunge a quelli in memoria (fino al prossimo rinnovo).
+    const keep = extraDays.length ? [...new Set([...win, ...n.dates.keys(), ...extraDays])].filter((y) => y >= win[0]).sort().slice(0, 6) : win;
+    // La preparazione può richiedere qualche secondo su un server lento:
     // si risponde subito e il lavoro continua in sottofondo.
-    const p = n.load();
+    const p = this.serial(() => n.ensureDays(keep));
     const wait = await Promise.race([p.then(() => 'ok'), new Promise((r) => setTimeout(() => r('lento'), 20_000))]);
     if (wait === 'lento') {
       p.catch(() => {});
@@ -138,7 +275,7 @@ export class Planner {
     const feed = net.feed;
     if (!feed.url || !feed.tripUpdates) return new Set();
     const c = this.ghostCache?.get(net.id);
-    if (c && Date.now() - c.at < 30_000) return c.set;
+    if (c && c.version === net.version && Date.now() - c.at < 30_000) return c.set;
     const [vp, tu] = await Promise.all([this.transit.vehicles(feed), this.transit.tripUpdates(feed.id)]);
     const seen = new Set(vp?.vehicles?.map((v) => v.trip));
     for (const id of tu?.trips?.keys() || []) seen.add(id);
@@ -165,7 +302,7 @@ export class Planner {
         }
       }
     }
-    (this.ghostCache ||= new Map()).set(net.id, { at: Date.now(), set: ghosts });
+    (this.ghostCache ||= new Map()).set(net.id, { at: Date.now(), set: ghosts, version: net.version });
     return ghosts;
   }
 
@@ -178,7 +315,7 @@ export class Planner {
     let off = 0;
     for (const f of this.cityFeeds) {
       if (!inBbox(f.bbox, from.lat, from.lon) && !inBbox(f.bbox, to.lat, to.lon)) continue;
-      const net = await this.readyNet(f.id);
+      const net = await this.readyNet(f.id, [lt.ymd, prevYmd(lt.ymd)]);
       if (!net) continue;
       let delay = null;
       if (live && f.tripUpdates) {
@@ -644,6 +781,81 @@ export class Planner {
   // ---------- ricerca luoghi ----------
 
   /** Indirizzi e luoghi (Photon/OpenStreetMap) + fermate e stazioni con quel nome. */
+  /** Quanti treni seguiti passano da ogni stazione (codice → numero), ricalcolato ogni 10 minuti. */
+  stationWeight() {
+    if (this._weight && Date.now() - this._weight.at < 600_000) return this._weight.map;
+    const map = new Map();
+    for (const tracker of this.trackers || []) {
+      for (const tr of tracker.trains.values()) for (const s of tr.stops || []) if (s.code) map.set(s.code, (map.get(s.code) || 0) + 1);
+    }
+    this._weight = { at: Date.now(), map };
+    return map;
+  }
+
+  /** Fermate della metro di una città (indice fermata → linee), dagli orari di oggi. */
+  metroStops(net) {
+    if (net._metro?.version === net.version) return net._metro.map;
+    const map = new Map();
+    for (const d of net.dates.values()) {
+      for (const P of d.patterns) {
+        const info = net.tripInfo(P.trips[0]);
+        if (info.mode !== 'metro') continue;
+        const line = lineInfo(net.id, info).line;
+        for (const st of P.stops) {
+          if (!map.has(st)) map.set(st, new Set());
+          map.get(st).add(line);
+        }
+      }
+    }
+    net._metro = { version: net.version, map };
+    return map;
+  }
+
+  /**
+   * Stazioni per nome: ferroviarie in tutta Italia; se il punto è dentro una città (mappa zoomata)
+   * anche le stazioni della metro e di Metromare/Roma–Viterbo. Le più vicine al punto vengono prima.
+   */
+  async findStations(q, near, city = false) {
+    const nq = normName(q || '');
+    if (nq.length < 2) return [];
+    const out = [];
+    // Nome che inizia con la ricerca > parola che inizia > contiene; poi le stazioni con più treni e le più vicine.
+    const match = (name) => {
+      const n = normName(name);
+      return n.startsWith(nq) ? 0 : (' ' + n).includes(' ' + nq) ? 0.4 : 1;
+    };
+    const score = (name, lat, lon) => match(name) + (near ? dist(near.lat, near.lon, lat, lon) / 300_000 : 0);
+    const weight = this.stationWeight();
+    for (const s of this.rail().stops) {
+      if (!normName(s.name).includes(nq)) continue;
+      const imp = Math.log10(1 + (weight.get(s.id) || 0)) / 4;
+      out.push({ id: `rail:${s.id}`, name: titleCase(s.name), sub: 'Stazione ferroviaria', lat: s.lat, lon: s.lon, rail: true, score: score(s.name, s.lat, s.lon) - imp });
+    }
+    if (city && near) {
+      for (const f of this.cityFeeds) {
+        if (!inBbox(f.bbox, near.lat, near.lon)) continue;
+        const net = this.net(f.id);
+        if (!net?.loaded) continue;
+        const seen = new Set();
+        for (const [i, lines] of this.metroStops(net)) {
+          const s = net.stops[i];
+          const n = normName(s.name);
+          if (!n.includes(nq) || seen.has(n)) continue;
+          seen.add(n);
+          const ls = [...lines].sort();
+          out.push({ id: `${f.id}:${i}`, name: s.name, sub: `Metro ${ls.join(', ')}`, lat: s.lat, lon: s.lon, metro: ls, score: score(s.name, s.lat, s.lon) - 0.05 });
+        }
+        if (f.id === 'roma' && this.astral?.ready) {
+          this.astral.stops.forEach((s, i) => {
+            if (normName(s.name).includes(nq)) out.push({ id: `astral:${i}`, name: s.name, sub: 'Metromare / Roma–Viterbo', lat: s.lat, lon: s.lon, rail: true, score: score(s.name, s.lat, s.lon) });
+          });
+        }
+      }
+    }
+    out.sort((a, b) => a.score - b.score);
+    return out.slice(0, 8).map(({ score, ...r }) => r);
+  }
+
   async geocode(q, near) {
     q = (q || '').trim();
     if (q.length < 2) return [];

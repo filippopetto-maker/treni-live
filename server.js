@@ -40,6 +40,13 @@ setInterval(() => {
   cpuStat.usage = process.cpuUsage();
 }, 60_000).unref();
 
+// Picco di memoria dall'avvio (per controllare il rinnovo notturno sul piano da 512 MB).
+const memPeak = { rss: 0, at: null };
+setInterval(() => {
+  const r = process.memoryUsage().rss;
+  if (r > memPeak.rss) Object.assign(memPeak, { rss: r, at: new Date().toISOString() });
+}, 2000).unref();
+
 const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || '127.0.0.1';
 
@@ -58,6 +65,8 @@ const planner = new Planner({ dataDir: path.join(ROOT, 'data'), transit, station
 const metroStatus = new MetroStatus();
 planner.metroStatus = metroStatus;
 transit.metro = new ScheduledMetro({ planner, status: metroStatus });
+// Orari del navigatore per Roma e Milano pronti appena possibile (ieri, oggi, domani).
+planner.warmup().catch((e) => log('Navigatore:', e.message));
 const astral = new AstralNet({ dataDir: path.join(ROOT, 'data'), rail });
 transit.astral = astral;
 planner.astral = astral;
@@ -187,6 +196,8 @@ const server = http.createServer(async (req, res) => {
         corseFantasma: Object.fromEntries([...(planner.ghostCache || new Map())].map(([k, v]) => [k, v.set.size])),
         feeds: transit.list(),
         guida: guide.stats(),
+        navigatore: planner.status(),
+        memoriaPicco: { MB: Math.round(memPeak.rss / 1e6), alle: memPeak.at },
       });
     }
     if (url.pathname === '/api/paths') {
@@ -248,6 +259,12 @@ const server = http.createServer(async (req, res) => {
       return send(req, res, 200, await planner.geocode(url.searchParams.get('q'), ll(url.searchParams.get('near'))));
     }
 
+    if (url.pathname === '/api/stations') {
+      const q = (url.searchParams.get('q') || '').slice(0, 60);
+      const near = ll(url.searchParams.get('near'));
+      const city = Number(url.searchParams.get('zoom')) >= 10;
+      return send(req, res, 200, await planner.findStations(q, near, city));
+    }
     if (url.pathname === '/api/line') {
       // Linea bus/tram/metro cercata per nome nella città che contiene il punto (centro della mappa).
       const lat = Number(url.searchParams.get('lat'));
@@ -264,6 +281,19 @@ const server = http.createServer(async (req, res) => {
         live = (vp?.vehicles || []).filter((v) => ids.has(st.trips.get(v.trip)?.[0] || v.route)).length;
       }
       return send(req, res, 200, { ...line, live });
+    }
+    if (url.pathname === '/api/navigatore/rinnovo' && req.method === 'POST') {
+      // Rinnovo degli orari a mano (lo stesso delle 3 di notte), al massimo uno ogni 10 minuti.
+      if (planner.nightlyRunning || Date.now() - (planner.nightlyManualAt || 0) < 600_000) {
+        return send(req, res, 429, { error: 'rinnovo già fatto da poco, riprova tra qualche minuto' });
+      }
+      planner.nightlyManualAt = Date.now();
+      planner.nightlyRunning = true;
+      planner
+        .nightly()
+        .catch((e) => log('Rinnovo a mano:', e.message))
+        .finally(() => (planner.nightlyRunning = false));
+      return send(req, res, 202, { ok: true, nota: 'rinnovo avviato: esito in /api/status (navigatore.rinnovoNotturno)' });
     }
     if (url.pathname === '/api/push/key') {
       return send(req, res, 200, { key: webPush.publicKey });

@@ -3,9 +3,12 @@
 // il nome della linea e la destinazione. Lo zip si riscarica una volta a settimana.
 
 import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import readline from 'node:readline';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fetchWithTimeout, log } from './util.js';
@@ -53,7 +56,9 @@ export class GtfsStatic {
       const res = await fetchWithTimeout(this.feed.static, {}, 180_000);
       if (!res.ok) throw new Error(`download HTTP ${res.status}`);
       await fs.mkdir(this.dir, { recursive: true });
-      await fs.writeFile(zip, Buffer.from(await res.arrayBuffer()));
+      const buf = Buffer.from(await res.arrayBuffer());
+      await fs.writeFile(zip, buf);
+      await this.saveMeta({ ...sigOf(res), sha1: sha1(buf), size: buf.length, at: new Date().toISOString() });
     }
     // `unzip` è presente di serie su macOS e sulla maggior parte dei Linux.
     await run('unzip', ['-o', '-q', zip, 'routes.txt', 'trips.txt', 'shapes.txt', '-d', this.dir]);
@@ -98,6 +103,83 @@ export class GtfsStatic {
       });
       this.shapes.set(id, out);
     }
+  }
+
+  async readMeta() {
+    try {
+      return JSON.parse(await fs.readFile(path.join(this.dir, 'zip-meta.json'), 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  async saveMeta(meta) {
+    await fs.writeFile(path.join(this.dir, 'zip-meta.json'), JSON.stringify(meta)).catch(() => {});
+  }
+
+  /**
+   * Controlla gli orari sul sito e scarica quelli nuovi solo se sono cambiati (o con force).
+   * Prima una richiesta leggera (HEAD: data, ETag, dimensione); se non basta si scarica e si
+   * confronta l'impronta del file. Lo zip nuovo si verifica prima di sostituire quello in uso.
+   */
+  async checkUpdate({ force = false } = {}) {
+    const zip = path.join(this.dir, 'gtfs.zip');
+    const meta = await this.readMeta();
+    if (!force && meta) {
+      const head = await fetchWithTimeout(this.feed.static, { method: 'HEAD' }, 30_000).catch(() => null);
+      if (head?.ok) {
+        const sig = sigOf(head);
+        const known = ['etag', 'lastModified', 'length'].filter((k) => sig[k] && meta[k]);
+        if (known.length && known.every((k) => sig[k] === meta[k])) return { changed: false, reason: 'nessuna novità sul sito' };
+      }
+    }
+    // Download direttamente su file (niente 50 MB in memoria), calcolando l'impronta strada facendo.
+    const res = await fetchWithTimeout(this.feed.static, {}, 300_000);
+    if (!res.ok) throw new Error(`download HTTP ${res.status}`);
+    const tmp = zip + '.new';
+    const hash = crypto.createHash('sha1');
+    let size = 0;
+    const counter = new Transform({
+      transform(chunk, _enc, cb) {
+        hash.update(chunk);
+        size += chunk.length;
+        cb(null, chunk);
+      },
+    });
+    await pipeline(Readable.fromWeb(res.body), counter, createWriteStream(tmp));
+    const sig = { ...sigOf(res), sha1: hash.digest('hex'), size, at: new Date().toISOString() };
+    const oldSha = meta?.sha1 || (await sha1File(zip).catch(() => null));
+    if (oldSha === sig.sha1) {
+      await fs.rm(tmp, { force: true });
+      await this.saveMeta(sig);
+      return { changed: false, reason: 'scaricati, identici a quelli in uso' };
+    }
+    try {
+      await run('unzip', ['-tq', tmp]);
+      const { stdout } = await run('unzip', ['-Z1', tmp]);
+      for (const f of ['stops.txt', 'stop_times.txt', 'trips.txt', 'routes.txt']) if (!stdout.split(/\r?\n/).includes(f)) throw new Error(`manca ${f}`);
+    } catch (e) {
+      await fs.rm(tmp, { force: true });
+      throw new Error('zip scaricato non valido: ' + e.message.split('\n')[0]);
+    }
+    await fs.rename(tmp, zip);
+    await this.saveMeta(sig);
+    log(`GTFS ${this.feed.id}: orari nuovi scaricati (${(size / 1e6).toFixed(1)} MB)`);
+    return { changed: true };
+  }
+
+  /** Dopo un GTFS nuovo: si indicizza a parte e si sostituisce solo a lavoro finito. */
+  async reindex() {
+    const zip = path.join(this.dir, 'gtfs.zip');
+    await run('unzip', ['-o', '-q', zip, 'routes.txt', 'trips.txt', 'shapes.txt', '-d', this.dir]);
+    const fresh = new GtfsStatic({ dataDir: path.dirname(path.dirname(this.dir)), feed: this.feed });
+    await fresh.index();
+    this.routes = fresh.routes;
+    this.trips = fresh.trips;
+    this.shapes = fresh.shapes;
+    this.cache = new Map();
+    this.lineCache = null;
+    log(`GTFS ${this.feed.id}: mappa aggiornata ai nuovi orari (${this.trips.size.toLocaleString('it-IT')} corse)`);
   }
 
   /** Informazioni su una corsa in tempo reale: nome linea, destinazione, colore. */
@@ -190,6 +272,14 @@ export class GtfsStatic {
     return { coords: this.cache.get(inf.shape), rname: inf.rname, dest: inf.dest, rcolor: inf.rcolor };
   }
 }
+
+const sha1 = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
+async function sha1File(file) {
+  const h = crypto.createHash('sha1');
+  for await (const chunk of createReadStream(file)) h.update(chunk);
+  return h.digest('hex');
+}
+const sigOf = (res) => ({ etag: res.headers.get('etag'), lastModified: res.headers.get('last-modified'), length: res.headers.get('content-length') });
 
 /** Copia di una stringa che non dipende dalla riga da cui è stata ritagliata. */
 const own = (s) => Buffer.from(s, 'utf8').toString('utf8');
