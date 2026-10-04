@@ -1,0 +1,59 @@
+# Prova di carico "picco-08" — 04/10/2026, 09:01:32
+Server: https://treni-live.onrender.com
+Prima della prova: treni seguiti 1063 (visibili 527), CPU 0% , memoria 251 MB
+
+## 5 utenti — CPU server 5% (quota piano gratuito ≈ 10%), blocco max 901 ms, memoria 422 MB, treni 569
+  treni            n=  40  mediana  272 ms  95%   1.1 s  max   1.7 s  errori 0
+  stato            n=  40  mediana  104 ms  95%  443 ms  max  774 ms  errori 0
+  bus_metro        n=  12  mediana  190 ms  95%   4.1 s  max   4.1 s  errori 0
+  notizie          n=  10  mediana  115 ms  95%  651 ms  max  651 ms  errori 0
+  fermate          n=   3  mediana  155 ms  95%  198 ms  max  198 ms  errori 0
+  cerca_indirizzo  n=   2  mediana   1.1 s  95%   1.1 s  max   1.1 s  errori 0
+  percorso_roma    n=   1  mediana   3.0 s  95%   3.0 s  max   3.0 s  errori 0
+
+## 10 utenti — CPU server 4% (quota piano gratuito ≈ 10%), blocco max 2603 ms, memoria 434 MB, treni 559
+  notizie          n=  20  mediana  106 ms  95%   3.0 s  max   3.0 s  errori 0
+  treni            n=  78  mediana  184 ms  95%  461 ms  max   3.8 s  errori 0
+  stato            n=  78  mediana  103 ms  95%  280 ms  max   4.8 s  errori 0
+  bus_metro        n=  30  mediana  193 ms  95%   2.6 s  max   2.7 s  errori 0
+  fermate          n=  10  mediana  104 ms  95%  275 ms  max  275 ms  errori 0
+  cerca_indirizzo  n=   6  mediana  257 ms  95%   2.8 s  max   2.8 s  errori 0
+  percorso_roma    n=   3  mediana   2.8 s  95%   4.2 s  max   4.2 s  errori 0
+
+## 20 utenti — CPU server 4% (quota piano gratuito ≈ 10%), blocco max 812 ms, memoria 425 MB, treni 564
+  notizie          n=  46  mediana  103 ms  95%  299 ms  max   1.9 s  errori 0
+  treni            n= 154  mediana  158 ms  95%  775 ms  max   1.4 s  errori 0
+  stato            n= 153  mediana  103 ms  95%  271 ms  max   1.4 s  errori 0
+  bus_metro        n=  59  mediana  106 ms  95%  776 ms  max  931 ms  errori 0
+  fermate          n=  16  mediana  104 ms  95%  500 ms  max  500 ms  errori 0
+  cerca_indirizzo  n=  14  mediana  248 ms  95%   1.3 s  max   1.3 s  errori 0
+  percorso_roma    n=   7  mediana  477 ms  95%  983 ms  max  983 ms  errori 0
+
+## 40 utenti — CPU server 8% (quota piano gratuito ≈ 10%), blocco max 1405 ms, memoria 444 MB, treni 574
+  treni            n= 311  mediana  274 ms  95%   1.2 s  max   1.9 s  errori 0
+  stato            n= 311  mediana  103 ms  95%  355 ms  max   1.5 s  errori 0
+  notizie          n=  90  mediana  104 ms  95%  744 ms  max   1.6 s  errori 0
+  bus_metro        n= 119  mediana  108 ms  95%  896 ms  max   1.7 s  errori 0
+  fermate          n=  34  mediana  104 ms  95%  540 ms  max  804 ms  errori 0
+  cerca_indirizzo  n=  24  mediana  246 ms  95%  863 ms  max  895 ms  errori 0
+  percorso_roma    n=  12  mediana  400 ms  95%   1.3 s  max   1.3 s  errori 0
+
+## 80 utenti — CPU server 10% (quota piano gratuito ≈ 10%), blocco max 1400 ms, memoria 455 MB, treni 572
+  notizie          n= 184  mediana  111 ms  95%   1.9 s  max   4.8 s  errori 0
+  treni            n= 614  mediana  294 ms  95%   1.7 s  max   3.0 s  errori 0
+  stato            n= 614  mediana  135 ms  95%   1.0 s  max   2.3 s  errori 0
+  bus_metro        n= 236  mediana  114 ms  95%   1.2 s  max   4.1 s  errori 0
+  fermate          n=  75  mediana  105 ms  95%  302 ms  max   1.3 s  errori 0
+  cerca_indirizzo  n=  50  mediana  619 ms  95%   2.0 s  max   2.5 s  errori 0
+  percorso_roma    n=  25  mediana  405 ms  95%   1.0 s  max   2.1 s  errori 0
+
+## Misto Roma/Milano, 6 utenti che cercano percorsi — CPU server 9% (quota piano gratuito ≈ 10%), blocco max 5704 ms, memoria 440 MB, treni 573
+  cerca_indirizzo  n=  60  mediana  718 ms  95%   3.7 s  max   5.5 s  errori 0
+  treni            n=  43  mediana  294 ms  95%   2.9 s  max   3.3 s  errori 0
+  stato            n=  43  mediana  105 ms  95%   1.8 s  max   3.0 s  errori 0
+  percorso_roma    n=  23  mediana  399 ms  95%   7.9 s  max  12.1 s  errori 0
+  bus_metro        n=  18  mediana  280 ms  95%   1.9 s  max   1.9 s  errori 0
+  notizie          n=  12  mediana  130 ms  95%   3.2 s  max   3.2 s  errori 0
+  fermate          n=   4  mediana  109 ms  95%  110 ms  max  110 ms  errori 0
+  percorso_milano  n=   6  mediana   3.2 s  95%   8.7 s  max   8.7 s  errori 2
+
