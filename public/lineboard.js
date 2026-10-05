@@ -145,7 +145,7 @@ function renderBoard() {
   const withGps = d.trips.filter((t) => t.gps).length;
   const risky = d.trips.filter((t) => t.ghost || t.cancelled).length;
   const sum = d.trips.length
-    ? `${d.trips.length} in arrivo${d.hasLive ? ` · ${withGps} con GPS` : ''}${risky ? ` · ${risky} a rischio` : ''}`
+    ? `${d.trips.length} in arrivo${d.hasLive && lb.line.mode !== 'metro' ? ` · ${withGps} con GPS` : ''}${risky ? ` · ${risky} a rischio` : ''}`
     : 'nessun passaggio nei prossimi 75 min';
   const dirs = d.directions
     .filter((x) => x.trips >= 3 || x.key === d.dir)

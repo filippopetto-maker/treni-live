@@ -305,7 +305,7 @@ async function pollTransit() {
       return;
     }
     $('#hint').textContent = !data.feeds.length
-      ? 'Nessun feed bus/tram in tempo reale configurato per questa zona (vedi feeds.json).'
+      ? 'Bus e tram disponibili solo a Roma e Milano.'
       : errors.length
         ? `Feed non disponibile: ${errors.map((f) => f.name).join(', ')}`
         : `Mezzi urbani: ${data.feeds.map((f) => f.name).join(', ')}. Metro: posizione stimata dagli orari.`;
@@ -829,7 +829,8 @@ async function searchLine(q, pos) {
     $('#q').blur();
     setPanel(false);
   }
-  if (!b.isEmpty()) map.fitBounds(b, { padding: mobile ? { top: 60, bottom: 140, left: 30, right: 30 } : { top: 60, bottom: 60, left: 340, right: 60 }, maxZoom: 15, duration: 700 });
+  // Su telefono il tabellone occupa la metà bassa dello schermo: la linea va inquadrata sopra.
+  if (!b.isEmpty()) map.fitBounds(b, { padding: mobile ? { top: 60, bottom: Math.round(innerHeight * 0.48), left: 30, right: 30 } : { top: 60, bottom: 60, left: 340, right: 60 }, maxZoom: 15, duration: 700 });
   // Lo zoom minimo per vedere i mezzi urbani resta 11: se la linea è lunga si resta a 11.
   map.once('moveend', () => {
     if (map.getZoom() < TRANSIT_MIN_ZOOM) map.easeTo({ zoom: TRANSIT_MIN_ZOOM, duration: 300 });

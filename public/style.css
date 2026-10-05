@@ -148,8 +148,9 @@ html, body { margin: 0; height: 100%; }
 
 .sugg {
   position: absolute; top: 100%; left: 16px; right: 0; z-index: 5; margin: 2px 0 0; padding: 0; list-style: none;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  background: #fff; color: #1d2330; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.18);
 }
+@media (prefers-color-scheme: dark) { .sugg { background: #181b22; color: #eef0f4; } }
 .sugg:empty { display: none; }
 .sugg li { display: flex; gap: 8px; padding: 6px 9px; cursor: pointer; align-items: center; }
 .sugg li:hover { background: rgba(127,127,127,.12); }

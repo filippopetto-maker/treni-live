@@ -85,8 +85,11 @@ export class RailLiveNet {
           if (a == null) a = d;
           if (d == null) d = a;
           if (a == null) continue;
-          if (d < a) d = a;
-          if (st.length && (st[st.length - 1] === i || a < dep[dep.length - 1])) continue;
+          // Sosta assurda (es. partenza con la data del giorno dopo, visto su Italo): si tiene l'arrivo.
+          if (d < a || d - a > 3 * 3600_000) d = a;
+          // Orari che tornano indietro: fermata scartata (prima il confronto era tra millisecondi e
+          // secondi e non scattava mai: una corsa "nel passato" faceva sparire le soluzioni buone).
+          if (st.length && (st[st.length - 1] === i || sec(a) < dep[dep.length - 1])) continue;
           st.push(i);
           arr.push(sec(a));
           dep.push(sec(d));

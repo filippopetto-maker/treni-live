@@ -10,6 +10,16 @@ import { inSpan } from '../metro-status.js';
 
 const ACCESS_M = 800;
 const ACCESS_MAX_M = 1500;
+
+/** Le corse di un percorso si susseguono nel tempo (2' di tolleranza per arrotondamenti e ritardi). */
+function timeOrdered(rides, t0) {
+  let t = t0 - 120;
+  for (const l of rides) {
+    if (l.dep < t - 120 || l.arr < l.dep) return false;
+    t = l.arr;
+  }
+  return true;
+}
 const RAIL_ACCESS_M = 1500;
 const CROSS_M = 400;
 const WALK_ONLY_MAX_M = 2500;
@@ -471,6 +481,9 @@ export class Planner {
         if (!raw) continue;
         const rides = raw.filter((l) => l.type === 'ride');
         if (!rides.length) continue;
+        // Difesa: un percorso deve andare avanti nel tempo (ogni mezzo parte dopo l'arrivo del precedente).
+        // Una soluzione incoerente faceva scartare dal filtro "durata" anche quelle buone.
+        if (!timeOrdered(rides, t0)) continue;
         const sig = rides.map((l) => `${l.view}/${l.pattern.trips[l.j]}/${l.b}/${l.e}`).join('|');
         const accessSec = raw[0].type === 'access' ? raw[0].sec : 0;
         nextT0 = Math.min(nextT0, rides[0].dep - accessSec + 60);
