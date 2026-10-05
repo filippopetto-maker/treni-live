@@ -257,6 +257,7 @@ export class ViaggiaTrenoTracker {
       from,
       to: pt(coord(F[j]), t1),
       a: fromCode,
+      pa: F[i].id, // fermata precedente: la linea disegnata sulla mappa va da qui a b
       b: F[j].id,
       prev: F[i].stazione,
       next: F[j].stazione,
@@ -328,8 +329,42 @@ function compactStops(a) {
   }));
 }
 
+const M_LON = 111320 * Math.cos((42 * Math.PI) / 180);
+const M_LAT = 110540;
+
+/** Punto di una polilinea più vicino a (lon, lat): frazione lungo il percorso (0–1) e distanza in metri. */
+function projectFrac(coords, lon, lat) {
+  let cum = 0;
+  let best = null;
+  for (let i = 1; i < coords.length; i++) {
+    const ax = (coords[i - 1][0] - lon) * M_LON, ay = (coords[i - 1][1] - lat) * M_LAT;
+    const bx = (coords[i][0] - lon) * M_LON, by = (coords[i][1] - lat) * M_LAT;
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    const u = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (len * len || 1)));
+    const d = Math.hypot(ax + u * dx, ay + u * dy);
+    if (!best || d < best.d) best = { d, s: cum + u * len };
+    cum += len;
+  }
+  return best && cum > 0 ? { d: best.d, f: best.s / cum } : null;
+}
+
 export function publicTrain(tr, rail) {
   const s = tr.seg;
+  // Il percorso tra la stazione di rilevamento e la fermata successiva, calcolato a sé, può scegliere un
+  // altro binario rispetto alla linea disegnata (fermata precedente → successiva): il pallino finiva
+  // fuori tracciato. Si usa quindi la stessa linea e si dice al browser da che punto (s0) partire.
+  let path = s.status === 'running' && rail ? rail.pathFor(s.a, s.b) : null;
+  let s0;
+  if (s.status === 'running' && rail && s.pa && s.pa !== s.a) {
+    const key = rail.pathFor(s.pa, s.b);
+    const c = key && rail.paths.get(key)?.coords;
+    const pr = c && projectFrac(c, s.from[0], s.from[1]);
+    if (pr && pr.d < 2500) {
+      path = key;
+      s0 = Math.round(pr.f * 1e5) / 1e5;
+    }
+  }
   return {
     id: tr.id,
     src: tr.src,
@@ -343,7 +378,8 @@ export function publicTrain(tr, rail) {
     from: s.from,
     to: s.to,
     // Id del percorso sui binari (null finché non è calcolato: il browser usa la linea retta).
-    path: s.status === 'running' && rail ? rail.pathFor(s.a, s.b) : null,
+    path,
+    s0,
     prev: s.prev,
     next: s.next,
     det: tr.det,

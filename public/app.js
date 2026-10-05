@@ -73,7 +73,8 @@ function position(t, now) {
   // Si ferma poco prima della prossima fermata se il treno è in ritardo sulla stima.
   const f = Math.max(0, Math.min(0.98, (now - t0) / (t1 - t0)));
   const p = t.path && pathCache.get(t.path);
-  if (p && p.pts) return alongPath(p, f);
+  // s0: da che punto del percorso parte il tratto (ultimo rilevamento), se il percorso è quello fermata→fermata.
+  if (p && p.pts) return alongPath(p, t.s0 ? t.s0 + (1 - t.s0) * f : f);
   return [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f];
 }
 
