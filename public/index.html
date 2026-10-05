@@ -23,7 +23,7 @@
     <div class="tk-view"><div class="tk-track" id="tkTrack"><div class="tk-run"><span class="tk-item">Carico le notizie…</span></div></div></div>
   </div>
 
-  <div id="lineChip" class="hidden"></div>
+  <div id="lineBoard" class="hidden"></div>
 
   <div id="guide" class="hidden" role="status" aria-live="polite">
     <div class="g-main">
@@ -36,7 +36,7 @@
       <button id="gBoard" type="button">Sono salito</button>
       <button id="gFollow" type="button" class="hidden">◎ Seguimi</button>
       <button id="gReplan" type="button">Ricalcola</button>
-      <button id="gEnd" type="button">Termina</button>
+      <button id="gEnd" type="button">⏹ Termina</button>
     </div>
   </div>
 
@@ -78,6 +78,7 @@
         <label class="sw"><input type="checkbox" id="swGuide" /><span class="sl" aria-hidden="true"></span><span class="sw-t"><b>🧭 Guida passo passo</b><small>Ti segue col GPS, schermo acceso, avvisi a voce</small></span></label>
         <label class="sw"><input type="checkbox" id="swPush" /><span class="sl" aria-hidden="true"></span><span class="sw-t"><b>🔔 Avvisi a schermo spento</b><small>Notifiche: arriva il mezzo, prossima fermata, scendi</small></span></label>
         <p id="guideNote" class="muted"></p>
+        <button id="guideStop" class="g-stopall hidden" type="button">⏹ Termina guida e notifiche</button>
       </div>
       <p id="navMsg" class="muted">Roma e Milano: bus, tram, metro e treni. Tasto destro (dal telefono: tieni premuto) sulla mappa per scegliere un punto; zoomando vedi le fermate con le prossime partenze.</p>
       <ol id="navResults"></ol>
@@ -120,6 +121,7 @@
   <script src="app.js"></script>
   <script src="nav.js"></script>
   <script src="ticker.js"></script>
+  <script src="lineboard.js"></script>
   <script src="guide-core.js"></script>
   <script src="guide.js"></script>
 </body>

@@ -265,6 +265,21 @@ const server = http.createServer(async (req, res) => {
       const city = Number(url.searchParams.get('zoom')) >= 10;
       return send(req, res, 200, await planner.findStations(q, near, city));
     }
+    if (url.pathname === '/api/line/board') {
+      // Tabellone della linea: arrivi alla fermata scelta in una direzione, con GPS e corse a rischio.
+      activity.touch();
+      const q = url.searchParams;
+      const feed = transit.feeds.find((f) => f.id === q.get('feed'));
+      const line = feed && transit.statics.get(feed.id)?.line(q.get('q') || '');
+      if (!line) return send(req, res, 404, { error: 'linea non trovata' });
+      const num = (k) => (q.get(k) == null || q.get(k) === '' ? null : Number(q.get(k)));
+      try {
+        const b = await planner.lineBoard({ feed: feed.id, routeIds: line.routeIds, dir: q.get('dir') || '', lat: num('lat'), lon: num('lon'), stop: num('stop') });
+        return send(req, res, 200, { line: { name: line.name, mode: line.mode, color: line.color }, ...b });
+      } catch (e) {
+        return send(req, res, 503, { error: e.message });
+      }
+    }
     if (url.pathname === '/api/line') {
       // Linea bus/tram/metro cercata per nome nella città che contiene il punto (centro della mappa).
       const lat = Number(url.searchParams.get('lat'));

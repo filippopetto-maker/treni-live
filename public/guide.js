@@ -50,19 +50,69 @@ function renderSwitches() {
   $('#swGuide').checked = prefs.guide;
   $('#swPush').checked = prefs.push;
   $('#guideNote').innerHTML = noteFor();
+  updateStopButton();
   if (nav.journeys?.length) renderJourneys();
+}
+
+/** Il tasto "Termina" nella scheda Percorso compare quando c'è una guida o ci sono notifiche attive. */
+function updateStopButton() {
+  let active = false;
+  try {
+    active = G.on || !!G.pushId || !!store.get('tl.trip', null);
+  } catch {}
+  $('#guideStop')?.classList.toggle('hidden', !active);
+}
+
+/** Ferma tutto: guida, GPS, voce, schermo acceso e le notifiche del server (anche dopo una riapertura). */
+async function endEverything() {
+  const saved = store.get('tl.trip', null);
+  const id = G.pushId || saved?.pushId;
+  G.pushId = null; // la chiamata al server la fa questa funzione, una volta sola
+  clearTimeout(resumeTimer); // un ripristino in arrivo dopo una riapertura non deve ripartire
+  stopGuide(true);
+  if (id) {
+    fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {});
+  }
+  G.pushId = null;
+  store.set('tl.trip', null);
+  updateStopButton();
+  $('#guideNote').innerHTML = 'Guida e notifiche terminate.' + (prefs.guide || prefs.push ? '<br>' + noteFor() : '');
 }
 
 $('#swGuide').addEventListener('change', (e) => {
   prefs.guide = e.target.checked;
   store.set('tl.guide', prefs.guide);
+  // Spenta durante un viaggio: si fermano GPS, voce e schermo acceso (le notifiche, se attive, restano).
+  if (!prefs.guide && G.on) {
+    if (G.watch != null) navigator.geolocation.clearWatch(G.watch);
+    G.watch = null;
+    G.wake?.release?.().catch(() => {});
+    G.voice = false;
+    if (can.voice) speechSynthesis.cancel();
+    if (!G.pushId) stopGuide(true);
+  } else if (prefs.guide && G.on) {
+    // Riaccesa durante il viaggio: tornano GPS, schermo acceso e voce (il tocco sblocca la voce su iPhone).
+    if (can.gps && G.watch == null) G.watch = navigator.geolocation.watchPosition(onPos, onPosErr, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+    keepAwake();
+    G.voice = can.voice;
+  }
   renderSwitches();
 });
-$('#swPush').addEventListener('change', (e) => {
+$('#swPush').addEventListener('change', async (e) => {
   prefs.push = e.target.checked;
   store.set('tl.push', prefs.push);
+  // Spento durante un viaggio: il server smette di mandare notifiche.
+  if (!prefs.push && (G.pushId || store.get('tl.trip', null)?.pushId)) {
+    const id = G.pushId || store.get('tl.trip', null)?.pushId;
+    fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {});
+    G.pushId = null;
+    saveState();
+    if (G.on && !prefs.guide) stopGuide(true);
+    render();
+  }
   renderSwitches();
 });
+$('#guideStop').addEventListener('click', endEverything);
 renderSwitches();
 
 function guideStartHtml() {
@@ -182,6 +232,7 @@ async function startGuide(j, resume = null) {
   refreshLive();
   saveState();
   render();
+  updateStopButton();
 }
 
 function stopGuide(user = true) {
@@ -202,6 +253,7 @@ function stopGuide(user = true) {
   $('#guide').classList.add('hidden');
   document.body.classList.remove('guiding');
   if (user) saveState();
+  updateStopButton();
 }
 
 // ---------- schermo acceso ----------
@@ -432,7 +484,7 @@ $('#gBoard').addEventListener('click', () => {
   const i = G.j.legs[G.i].type === 'ride' ? G.i : G.i + 1;
   boarded(i);
 });
-$('#gEnd').addEventListener('click', () => stopGuide(true));
+$('#gEnd').addEventListener('click', endEverything);
 $('#gFollow').addEventListener('click', () => {
   G.follow = true;
   drawMe();
@@ -489,6 +541,11 @@ async function startPush(j) {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
+    // Spenti nel frattempo (interruttore o "Termina"): si annulla subito sul server.
+    if (!prefs.push || !G.on) {
+      fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id }) }).catch(() => {});
+      return;
+    }
     G.pushId = d.id;
     saveState();
     render();
@@ -528,13 +585,19 @@ if ('serviceWorker' in navigator) {
   if (prefs.push) swReg().catch(() => {});
 }
 
+let resumeTimer = null;
+
 // ---------- ripresa dopo una chiusura (iPhone ricarica spesso le app in secondo piano) ----------
 
 (function resume() {
   const s = store.get('tl.trip', null);
   if (!s?.j?.legs?.length) return;
   const end = s.j.arr + 30 * 60_000;
-  if (Date.now() > end) return store.set('tl.trip', null);
+  if (Date.now() > end) {
+    // Viaggio finito da tempo: si avvisa anche il server di smettere con le notifiche.
+    if (s.pushId) fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: s.pushId }) }).catch(() => {});
+    return store.set('tl.trip', null);
+  }
   // Subito, senza aspettare la mappa (che sul telefono può metterci qualche secondo).
-  setTimeout(() => startGuide(s.j, s), 0);
+  resumeTimer = setTimeout(() => store.get('tl.trip', null) && startGuide(s.j, s), 0);
 })();

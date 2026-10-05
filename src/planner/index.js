@@ -72,6 +72,17 @@ export class Planner {
     this.prep = Promise.resolve(); // una città alla volta legge le tabelle complete (picco di memoria)
     this.nightlyReport = null;
     this.scheduleNightly();
+    // ATAC ripubblica gli orari ogni mattina (con nuovi identificativi delle corse): oltre al rinnovo
+    // delle 3 c'è un controllo leggero ogni ora tra le 5 e le 23, che ricostruisce solo se il file è cambiato.
+    this.hourly = setInterval(() => {
+      const h = Math.floor(localTime(Date.now()).sec / 3600);
+      if (h < 5 || h > 23 || this.nightlyRunning) return;
+      this.nightlyRunning = true;
+      this.nightly({ onlyIfChanged: true })
+        .catch((e) => log('Controllo orari:', e.message))
+        .finally(() => (this.nightlyRunning = false));
+    }, 3600_000);
+    this.hourly.unref?.();
   }
 
   /** Giorni da tenere pronti: ieri (notturni dopo mezzanotte), oggi, domani. */
@@ -109,7 +120,10 @@ export class Planner {
     if (wait <= 60_000) wait += 86400_000;
     clearTimeout(this.nightlyTimer);
     this.nightlyTimer = setTimeout(async () => {
+      while (this.nightlyRunning) await new Promise((r) => setTimeout(r, 10_000));
+      this.nightlyRunning = true;
       await this.nightly().catch((e) => log('Rinnovo notturno:', e.message));
+      this.nightlyRunning = false;
       this.scheduleNightly();
     }, wait);
     this.nightlyTimer.unref?.();
@@ -121,10 +135,11 @@ export class Planner {
    * se cambiati o se quelli in uso stanno per scadere), poi si preparano ieri/oggi/domani.
    * Un errore su una città non ferma l'altra; se il download fallisce restano gli orari vecchi.
    */
-  async nightly({ forceDownload = false } = {}) {
-    const rep = { inizio: new Date().toISOString(), citta: {} };
-    this.nightlyReport = rep;
-    log('Rinnovo notturno degli orari: inizio');
+  async nightly({ forceDownload = false, onlyIfChanged = false } = {}) {
+    const rep = { inizio: new Date().toISOString(), tipo: onlyIfChanged ? 'controllo orario' : 'rinnovo completo', citta: {} };
+    if (!onlyIfChanged) this.nightlyReport = rep;
+    else this.lastCheck = rep;
+    log(onlyIfChanged ? 'Controllo orari nuovi' : 'Rinnovo notturno degli orari: inizio');
     for (const f of this.cityFeeds) {
       const r = (rep.citta[f.id] = {});
       const t0 = Date.now();
@@ -156,9 +171,10 @@ export class Planner {
             globalThis.gc?.();
             await net.ensureDays(this.windowDays());
           });
-        } else {
+        } else if (!onlyIfChanged) {
           await this.serial(() => net.ensureDays(this.windowDays()));
         }
+        if (changed && onlyIfChanged) this.nightlyReport = rep;
         r.giorni = [...net.dates.keys()];
         r.corse = net.tripIds?.length || 0;
         r.orariFinoAl = net.calendarEnd();
@@ -167,7 +183,7 @@ export class Planner {
         r.errore = e.message;
       }
       r.secondi = Math.round((Date.now() - t0) / 1000);
-      log(`Rinnovo notturno ${f.id}: ${JSON.stringify(r)}`);
+      if (!onlyIfChanged || r.download !== 'nessuna novità sul sito') log(`Orari ${f.id}: ${JSON.stringify(r)}`);
     }
     // Città liberate durante la ricostruzione di un'altra: si ripreparano.
     for (const f of this.cityFeeds) {
@@ -190,7 +206,7 @@ export class Planner {
   }
 
   status() {
-    const out = { citta: {}, rinnovoNotturno: this.nightlyReport, prossimoRinnovo: this.nightlyNext ? new Date(this.nightlyNext).toISOString() : null };
+    const out = { citta: {}, rinnovoNotturno: this.nightlyReport, ultimoControllo: this.lastCheck ? { alle: this.lastCheck.inizio, esito: Object.fromEntries(Object.entries(this.lastCheck.citta).map(([k, v]) => [k, v.download || v.errore])) } : null, prossimoRinnovo: this.nightlyNext ? new Date(this.nightlyNext).toISOString() : null };
     for (const [id, n] of this.nets) {
       out.citta[id] = {
         pronta: n.loaded,
@@ -690,6 +706,134 @@ export class Planner {
   }
 
   /** Prossime partenze da una fermata ("roma:123" o "rail:S01700"), ritardi compresi. */
+  /**
+   * Tabellone di una linea bus/tram/metro in una direzione: per ogni corsa che deve ancora passare
+   * dalla fermata scelta (o la più vicina al punto dato), tra quanto arriva, se il mezzo trasmette
+   * la posizione GPS, quante fermate mancano, e se è una corsa "fantasma" (doveva essere partita
+   * ma non si vede: probabilmente salta).
+   */
+  async lineBoard({ feed, routeIds, dir = '', lat = null, lon = null, stop = null, minutes = 75 }) {
+    const net = await this.readyNet(feed);
+    if (!net) return null;
+    const now = Date.now();
+    const lt = localTime(now);
+    const want = new Set(routeIds);
+    const st = net.statics;
+    const sets = [{ d: net.day(lt.ymd), shift: 0 }];
+    if (lt.sec < 4 * 3600) sets.push({ d: net.day(prevYmd(lt.ymd)), shift: -86400 });
+    // Direzioni (destinazioni) della linea oggi, con le loro sequenze di fermate.
+    const dirs = new Map(); // destinazione normalizzata → { headsign, pats: [{P, shift}], trips }
+    for (const { d, shift } of sets) {
+      for (const P of d.patterns) {
+        const tid = net.tripIds[P.trips[0]];
+        const tr = st.trips.get(tid);
+        if (!tr || !want.has(tr[0])) continue;
+        const key = normName(tr[2] || '?');
+        if (!dirs.has(key)) dirs.set(key, { headsign: titleCase(tr[2] || '?'), pats: [], trips: 0 });
+        const e = dirs.get(key);
+        e.pats.push({ P, shift, est: d.estimated });
+        e.trips += P.trips.length;
+      }
+    }
+    const list = [...dirs.entries()].sort((a, b) => b[1].trips - a[1].trips);
+    if (!list.length) return { directions: [], dir: null, stops: [], stop: null, trips: [], note: 'Nessuna corsa oggi per questa linea.' };
+    const chosen = list.find(([k]) => k === normName(dir)) || list[0];
+    const D = chosen[1];
+    // Fermate della direzione: quelle della sequenza con più corse, nell'ordine di percorrenza.
+    const main = D.pats.reduce((a, b) => (b.P.trips.length > a.P.trips.length ? b : a)).P;
+    const stops = Array.from(main.stops, (i) => ({ id: i, name: net.stops[i].name, lat: net.stops[i].lat, lon: net.stops[i].lon }));
+    let target = stop != null && stops.some((x) => x.id === +stop) ? +stop : null;
+    if (target == null && lat != null && lon != null) {
+      let best = Infinity;
+      for (const x of stops) {
+        const m = dist(lat, lon, x.lat, x.lon);
+        if (m < best) [best, target] = [m, x.id];
+      }
+    }
+    if (target == null) target = stops[Math.max(0, stops.length - 2)]?.id ?? null;
+    // Dati dal vivo: ritardi (TripUpdates), posizioni (GPS) e corse fantasma.
+    const fobj = net.feed;
+    const vp = fobj.url ? await this.transit.vehicles(fobj).catch(() => null) : null;
+    const byTrip = new Map((vp?.vehicles || []).map((v) => [v.trip, v]));
+    if (fobj.tripUpdates) {
+      const tu = await this.transit.tripUpdates(fobj.id).catch(() => null);
+      if (tu?.trips?.size) net.applyDelays(tu.trips);
+    }
+    const ghosts = await this.ghostTrips(net, lt).catch(() => new Set());
+    const hasLive = !!fobj.url;
+    const out = [];
+    for (const { P, shift, est } of D.pats) {
+      const k = Array.prototype.indexOf.call(P.stops, target);
+      if (k < 0) continue;
+      const n = P.n;
+      for (let j = 0; j < P.trips.length; j++) {
+        const ti = P.trips[j];
+        const tid = net.tripIds[ti];
+        const live = !!net.tripLive?.[ti];
+        const delay = live ? net.tripDelay[ti] : 0;
+        const cancelled = delay >= 1e7;
+        const sched = P.arr[j * n + k] + shift;
+        const first = P.dep[j * n] + shift;
+        const v = byTrip.get(tid);
+        // Dove si trova il mezzo: fermata della sequenza più vicina alla posizione GPS.
+        let at = null;
+        if (v) {
+          let best = Infinity;
+          for (let i = 0; i < n; i++) {
+            const s2 = net.stops[P.stops[i]];
+            const m = dist(v.lat, v.lon, s2.lat, s2.lon);
+            if (m < best) [best, at] = [m, i];
+          }
+        }
+        let eta = sched + (cancelled ? 0 : delay);
+        let shown = live && !cancelled ? delay : null;
+        // Con un GPS recente l'arrivo si stima dalla posizione vera (i ritardi dichiarati a volte sono strani);
+        // una posizione vecchia (oltre 3 minuti) non si usa per decidere niente.
+        const fresh = v && (!v.ts || now / 1000 - v.ts < 180);
+        if (fresh && at != null && at > k) continue; // già passato dalla fermata
+        if (fresh && at != null) {
+          eta = lt.sec + Math.max(0, P.arr[j * n + k] - P.arr[j * n + at]);
+          if (lt.sec >= first) shown = eta - sched; // prima della partenza dal capolinea non ha senso
+        }
+        if (!v && eta < lt.sec - 60) continue;
+        if (eta > lt.sec + minutes * 60) continue;
+        const started = lt.sec >= first + (cancelled ? 0 : delay);
+        let stopsAway = null;
+        if (at != null) stopsAway = Math.max(0, k - at);
+        else if (started) {
+          let passed = 0;
+          for (let i = 0; i < n; i++) if (P.arr[j * n + i] + shift + delay <= lt.sec) passed = i;
+          stopsAway = Math.max(0, k - passed);
+        }
+        out.push({
+          tripId: tid,
+          eta: lt.midnight + eta * 1000,
+          sched: lt.midnight + sched * 1000,
+          delay: shown,
+          gps: v ? { lat: v.lat, lon: v.lon, age: v.ts ? Math.max(0, Math.round(now / 1000 - v.ts)) : null, vehicle: v.vlabel || v.vid || v.id } : null,
+          started,
+          stopsAway,
+          ghost: ghosts.has(ti) || undefined,
+          cancelled: cancelled || undefined,
+          estimated: !!(est && est.surface) || undefined,
+          fromTerminus: !started ? `${net.stops[P.stops[0]].name} alle ${new Date(lt.midnight + first * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: TZ })}` : undefined,
+        });
+      }
+    }
+    out.sort((a, b) => a.eta - b.eta);
+    const seen = new Set();
+    const trips = out.filter((x) => !seen.has(x.tripId) && seen.add(x.tripId)).slice(0, 10);
+    return {
+      directions: list.map(([k, e]) => ({ key: k, headsign: e.headsign, trips: e.trips })),
+      dir: chosen[0],
+      stops,
+      stop: stops.find((x) => x.id === target) || null,
+      hasLive,
+      trips,
+      note: this.estimatedNote(net, sets.map((x) => x.d.estimated)) || undefined,
+    };
+  }
+
   async arrivals(id, minutes = 90) {
     const [src, key] = [id.slice(0, id.indexOf(':')), id.slice(id.indexOf(':') + 1)];
     const now = Date.now();

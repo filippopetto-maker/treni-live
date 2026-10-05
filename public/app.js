@@ -269,7 +269,12 @@ async function pollTransit() {
   try {
     const data = await (await fetch(`/api/transit?bbox=${bbox}`)).json();
     // Bus e tram si riconoscono dal nome GTFS ("64"), la metro dal nome comune ("A", "M1").
-    const onLine = (v) => !lineFilter || (v.feed === lineFilter.feed && String(v.rname ?? v.route) === (v.mode === 'metro' || v.scheduled ? lineFilter.name : lineFilter.short));
+    const onLine = (v) =>
+      !lineFilter ||
+      (v.feed === lineFilter.feed &&
+        String(v.rname ?? v.route) === (v.mode === 'metro' || v.scheduled ? lineFilter.name : lineFilter.short) &&
+        // direzione scelta nel tabellone (se il mezzo dice dove va)
+        (!lineFilter.dirKey || !v.dest || normKey(v.dest) === lineFilter.dirKey));
     const surface = transitOn ? data.vehicles.filter(onLine) : [];
     src.setData({
       type: 'FeatureCollection',
@@ -691,6 +696,9 @@ if (mobile) {
 }
 // ---------- linee bus/tram/metro (quando si è zoomati su una città) ----------
 
+/** Come normName del server: maiuscole, senza accenti né punteggiatura. */
+const normKey = (s) => String(s || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]+/g, ' ').trim();
+
 const MODE_LABEL = { bus: 'Bus', tram: 'Tram', filobus: 'Filobus', metro: 'Metro' };
 
 function showLineHint(n) {
@@ -698,18 +706,13 @@ function showLineHint(n) {
   const live = l.live == null ? 'posizioni live non disponibili in questa città' : `${n} ${n === 1 ? 'mezzo' : 'mezzi'} in servizio nella zona`;
   const pill = `<span class="line-pill" style="background:${esc(l.color)}">${esc(MODE_LABEL[l.mode] || 'Linea')} ${esc(l.name)}</span>`;
   $('#hint').innerHTML = `${pill} ${l.long ? esc(l.long) + ' · ' : ''}${live}`;
-  // Etichetta sempre visibile sulla mappa (sul telefono il pannello è chiuso).
-  const chip = $('#lineChip');
-  chip.innerHTML = `${pill}<span>${l.live == null ? 'solo percorso' : `${n} in servizio`}</span><button type="button" aria-label="Mostra tutti i mezzi">✕</button>`;
-  chip.classList.remove('hidden');
-  chip.querySelector('button').onclick = clearLine;
 }
 
 function clearLine() {
   lineFilter = null;
   map.getSource('line-hl')?.setData({ type: 'FeatureCollection', features: [] });
   $('#hint').textContent = '';
-  $('#lineChip').classList.add('hidden');
+  closeBoard();
   pollTransit();
 }
 
@@ -719,7 +722,9 @@ async function searchLine(q) {
   if (!r.ok) return false;
   const l = await r.json();
   const color = l.mode === 'metro' && LINE_COLORS[l.name] ? LINE_COLORS[l.name] : l.color || COLORS[l.mode] || COLORS.bus;
-  lineFilter = { feed: l.feed, name: l.name, short: l.short, mode: l.mode, color, live: l.mode === 'metro' ? 0 : l.live, long: l.long };
+  lineFilter = { feed: l.feed, name: l.name, short: l.short, mode: l.mode, color, live: l.mode === 'metro' ? 0 : l.live, long: l.long, dirKey: null };
+  // Tabellone della linea: arrivi alla fermata più vicina a te (o al centro della mappa).
+  openBoard({ feed: l.feed, q, name: l.name, mode: l.mode, color }, { lat: c.lat, lon: c.lng });
   map.getSource('line-hl')?.setData({
     type: 'FeatureCollection',
     features: l.dirs.map((d) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: d.coords }, properties: { color, headsign: d.headsign } })),
