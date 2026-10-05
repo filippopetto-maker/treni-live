@@ -81,6 +81,7 @@ export class Planner {
     this.crossCache = new Map();
     this.prep = Promise.resolve(); // una città alla volta legge le tabelle complete (picco di memoria)
     this.nightlyReport = null;
+    this.pendingRebuild = new Set(); // città con orari nuovi già sulla mappa, navigatore da rifare alle 3
     this.scheduleNightly();
     // ATAC ripubblica gli orari ogni mattina (con nuovi identificativi delle corse): oltre al rinnovo
     // delle 3 c'è un controllo leggero ogni ora tra le 5 e le 23, che ricostruisce solo se il file è cambiato.
@@ -91,7 +92,7 @@ export class Planner {
       this.nightly({ onlyIfChanged: true })
         .catch((e) => log('Controllo orari:', e.message))
         .finally(() => (this.nightlyRunning = false));
-    }, 3600_000);
+    }, Number(process.env.NAV_CHECK_MS) || 3600_000);
     this.hourly.unref?.();
   }
 
@@ -168,7 +169,31 @@ export class Planner {
         } catch (e) {
           r.download = 'non riuscito: ' + e.message + ' (restano gli orari in uso)';
         }
-        if (changed) {
+        if (changed && onlyIfChanged) {
+          // Di giorno NON si ricostruisce la rete qui: su Render (512 MB, 0,1 CPU) la ricostruzione
+          // serale ha esaurito la memoria (5/10 20:50) o bloccato il server (21:52), e dopo il riavvio
+          // l'immagine aveva di nuovo l'orario vecchio → altro tentativo un'ora dopo, in loop.
+          this.pendingRebuild.add(f.id);
+          const hook = process.env.RENDER_DEPLOY_HOOK;
+          let deployed = false;
+          if (hook) {
+            // Render ricostruisce l'immagine (orari scaricati e preparati sulla sua macchina di build)
+            // e la mette in linea al posto di questa: qui non si fa nessun lavoro pesante.
+            const h = await fetchWithTimeout(hook, { method: 'POST' }, 30_000).catch((e) => ({ ok: false, status: e.message }));
+            deployed = h.ok;
+            r.download += h.ok ? ' → chiesta a Render una nuova immagine con gli orari aggiornati' : ` → deploy hook non riuscito (${h.status})`;
+          }
+          if (!deployed) {
+            // Senza deploy hook: si aggiorna solo la mappa (leggero, ~30 s); il navigatore alle 3.
+            r.download += ' → mappa aggiornata, navigatore aggiornato alle 3';
+            await this.serial(async () => {
+              this.dropCaches(f.id);
+              globalThis.gc?.();
+              await st.reindex();
+              globalThis.gc?.();
+            });
+          }
+        } else if (changed || (!onlyIfChanged && this.pendingRebuild.has(f.id))) {
           // Orari nuovi: la mappa si reindicizza e la rete del navigatore si ricostruisce.
           await this.serial(async () => {
             // Per qualche secondo si libera anche l'altra città: la ricostruzione è il momento
@@ -181,6 +206,7 @@ export class Planner {
             globalThis.gc?.();
             await net.ensureDays(this.windowDays());
           });
+          this.pendingRebuild.delete(f.id);
         } else if (!onlyIfChanged) {
           await this.serial(() => net.ensureDays(this.windowDays()));
         }
@@ -302,6 +328,9 @@ export class Planner {
   async ghostTrips(net, lt) {
     const feed = net.feed;
     if (!feed.url || !feed.tripUpdates) return new Set();
+    // Mappa con orari nuovi e navigatore ancora sui vecchi: gli identificativi delle corse non
+    // coincidono, quindi non si può dire quali corse mancano dai dati live.
+    if (this.pendingRebuild.has(net.id)) return new Set();
     const c = this.ghostCache?.get(net.id);
     if (c && c.version === net.version && Date.now() - c.at < 30_000) return c.set;
     const [vp, tu] = await Promise.all([this.transit.vehicles(feed), this.transit.tripUpdates(feed.id)]);
@@ -889,7 +918,9 @@ export class Planner {
       stop: stops.find((x) => x.id === target) || null,
       hasLive,
       trips,
-      note: this.estimatedNote(net, sets.map((x) => x.d.estimated)) || undefined,
+      note:
+        this.estimatedNote(net, sets.map((x) => x.d.estimated)) ||
+        (this.pendingRebuild.has(net.id) ? 'L’azienda ha appena pubblicato orari nuovi: fino a stanotte alcuni mezzi possono risultare senza GPS.' : undefined),
     };
   }
 

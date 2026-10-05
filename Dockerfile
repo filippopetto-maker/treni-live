@@ -8,6 +8,14 @@ RUN apt-get update \
 WORKDIR /app
 COPY --chown=node:node . .
 
+# Orari statici scaricati con ADD: Docker controlla il file a ogni costruzione e, se l'azienda ne ha
+# pubblicato uno nuovo, rifà la preparazione qui sotto invece di riusare la cache. Senza questo, un
+# riavvio di Render ripartiva con l'orario vecchio e il server provava a ricostruirlo da solo
+# (memoria esaurita il 5/10 alle 20:50). Il deploy hook (RENDER_DEPLOY_HOOK) rifà l'immagine quando
+# il controllo orario trova orari nuovi.
+ADD https://romamobilita.it/wp-content/uploads/shared/rome_static_gtfs.zip data/gtfs/roma/gtfs.zip
+ADD https://dati.comune.milano.it/gtfs.zip data/gtfs/milano/gtfs.zip
+
 # Dati già pronti (binari OSM, stazioni, percorsi) dalla cartella seed/: il disco dei servizi
 # gratuiti non è permanente, così a ogni avvio non si riscarica tutto da Overpass.
 RUN mkdir -p data \
