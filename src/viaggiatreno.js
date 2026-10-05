@@ -48,6 +48,7 @@ export class ViaggiaTrenoTracker {
     this.limiter = new Limiter({ concurrency: 14, rps });
     this.refreshMs = refreshMs;
     this.sweepMs = sweepMs;
+    this.unknownUntil = new Map(); // fermate non risolvibili → riprovare dopo questo istante
     this.trains = new Map(); // key "S01700/9651/1790892000000" → stato
     this.rfiCircolanti = null;
     this.sweeps = 0;
@@ -169,6 +170,7 @@ export class ViaggiaTrenoTracker {
       this.trains.delete(tr.key);
       return;
     }
+    await this.resolveStations(a.fermate);
     const seg = this.segment(a, now);
     if (seg?.status === 'arrived') {
       this.trains.delete(tr.key);
@@ -199,6 +201,33 @@ export class ViaggiaTrenoTracker {
       // Un po' di jitter per spalmare le richieste nel tempo.
       tr.nextRefresh = now + this.refreshMs * (0.85 + Math.random() * 0.3);
     }
+  }
+
+  /**
+   * Fermate fuori dall'anagrafica RFI (linee di altri gestori: FNM, Ferrovie Emilia-Romagna, GTT Canavese,
+   * Sud Est, ARST, Umbria Mobilità…): senza coordinate il treno non si poteva disegnare. ViaggiaTreno
+   * le conosce con dettaglioStazione; si aggiungono qui, una volta sola. I fallimenti si riprovano dopo 6 ore.
+   */
+  async resolveStations(fermate) {
+    const now = Date.now();
+    const todo = [...new Set((fermate || []).map((f) => f.id))]
+      .filter((id) => id && !this.st.byCode.has(id) && !(this.unknownUntil.get(id) > now))
+      .slice(0, 40);
+    await Promise.all(
+      todo.map(async (id) => {
+        try {
+          const d = await this.get(`/dettaglioStazione/${id}/1`, 'hi');
+          const lat = Number(d?.lat);
+          const lon = Number(d?.lon);
+          if (lat > 35 && lat < 48 && lon > 6 && lon < 19) {
+            const name = (fermate.find((f) => f.id === id)?.stazione || id).trim();
+            this.st.byCode.set(id, { code: id, name, lat, lon, tipo: 9, zoom: 99, extra: true });
+            return;
+          }
+        } catch {}
+        this.unknownUntil.set(id, now + 6 * 3600_000);
+      })
+    );
   }
 
   /** Calcola il tratto attuale del treno a partire dalla risposta di andamentoTreno. */
