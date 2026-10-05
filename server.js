@@ -333,7 +333,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/guide/stop' && req.method === 'POST') {
       const b = await readJson(req).catch(() => ({}));
-      return send(req, res, 200, { ok: guide.stop(String(b.id || '')) });
+      const ep = typeof b.endpoint === 'string' && /^https:\/\//.test(b.endpoint) ? b.endpoint : '';
+      return send(req, res, 200, { ok: true, fermate: guide.stop(String(b.id || ''), ep) });
     }
     if (url.pathname === '/api/guide/live') {
       activity.touch();

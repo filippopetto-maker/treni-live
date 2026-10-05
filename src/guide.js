@@ -94,8 +94,11 @@ export class GuideService {
     return { id, notifica: status };
   }
 
-  stop(id) {
-    return this.sessions.delete(id);
+  /** Ferma la sessione con questo id e tutte quelle dello stesso telefono (abbonamento). */
+  stop(id, endpoint) {
+    let n = this.sessions.delete(id) ? 1 : 0;
+    if (endpoint) for (const [k, s] of this.sessions) if (s.sub.endpoint === endpoint && this.sessions.delete(k)) n++;
+    return n;
   }
 
   async tick() {
@@ -140,6 +143,8 @@ export class GuideService {
   }
 
   async send(s, msg) {
+    // Fermata mentre si leggevano i dati dal vivo ("Termina" premuto in quel momento): niente invio.
+    if (!this.sessions.has(s.id)) return;
     const st = await this.push.send(s.sub, msg);
     if (st === 404 || st === 410) this.sessions.delete(s.id);
   }

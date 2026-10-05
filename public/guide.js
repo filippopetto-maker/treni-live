@@ -63,6 +63,30 @@ function updateStopButton() {
   $('#guideStop')?.classList.toggle('hidden', !active);
 }
 
+/**
+ * Dice al server di smettere con le notifiche di questo telefono: per identificativo E per indirizzo
+ * dell'abbonamento (così si fermano anche sessioni "orfane" di cui il telefono ha perso l'id), con
+ * keepalive (arriva anche se la pagina si chiude subito) e un secondo tentativo se la rete manca.
+ * Con `unsubscribe` si cancella anche l'abbonamento: da quel momento nessun messaggio può più
+ * arrivare a questo telefono; al prossimo viaggio ci si riabbona da soli (il permesso resta).
+ */
+async function stopServerGuide(id, { unsubscribe = false } = {}) {
+  let sub = null;
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration('/');
+    sub = (await reg?.pushManager?.getSubscription()) || null;
+  } catch {}
+  if (!id && !sub) return;
+  const body = JSON.stringify({ id: id || '', endpoint: sub?.endpoint || '' });
+  const post = () => fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true });
+  post().catch(() => setTimeout(() => post().catch(() => {}), 5000));
+  if (unsubscribe && sub) {
+    try {
+      await sub.unsubscribe();
+    } catch {}
+  }
+}
+
 /** Ferma tutto: guida, GPS, voce, schermo acceso e le notifiche del server (anche dopo una riapertura). */
 async function endEverything() {
   const saved = store.get('tl.trip', null);
@@ -70,9 +94,7 @@ async function endEverything() {
   G.pushId = null; // la chiamata al server la fa questa funzione, una volta sola
   clearTimeout(resumeTimer); // un ripristino in arrivo dopo una riapertura non deve ripartire
   stopGuide(true);
-  if (id) {
-    fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {});
-  }
+  stopServerGuide(id, { unsubscribe: true });
   G.pushId = null;
   store.set('tl.trip', null);
   updateStopButton();
@@ -102,9 +124,9 @@ $('#swPush').addEventListener('change', async (e) => {
   prefs.push = e.target.checked;
   store.set('tl.push', prefs.push);
   // Spento durante un viaggio: il server smette di mandare notifiche.
-  if (!prefs.push && (G.pushId || store.get('tl.trip', null)?.pushId)) {
-    const id = G.pushId || store.get('tl.trip', null)?.pushId;
-    fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {});
+  if (!prefs.push) {
+    // Anche senza id noto: lo stop per abbonamento ferma eventuali sessioni rimaste sul server.
+    stopServerGuide(G.pushId || store.get('tl.trip', null)?.pushId, { unsubscribe: true });
     G.pushId = null;
     saveState();
     if (G.on && !prefs.guide) stopGuide(true);
@@ -243,7 +265,7 @@ function stopGuide(user = true) {
   G.wake?.release?.().catch(() => {});
   G.wake = null;
   if (user && G.pushId) {
-    fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: G.pushId }) }).catch(() => {});
+    stopServerGuide(G.pushId);
     G.pushId = null;
   }
   G.on = false;
@@ -588,7 +610,7 @@ async function startPush(j) {
     if (!r.ok) throw new Error(d.error);
     // Spenti nel frattempo (interruttore o "Termina"): si annulla subito sul server.
     if (!prefs.push || !G.on) {
-      fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id }) }).catch(() => {});
+      stopServerGuide(d.id);
       return;
     }
     G.pushId = d.id;
@@ -640,7 +662,7 @@ let resumeTimer = null;
   const end = s.j.arr + 30 * 60_000;
   if (Date.now() > end) {
     // Viaggio finito da tempo: si avvisa anche il server di smettere con le notifiche.
-    if (s.pushId) fetch('/api/guide/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: s.pushId }) }).catch(() => {});
+    if (s.pushId) stopServerGuide(s.pushId);
     return store.set('tl.trip', null);
   }
   // Subito, senza aspettare la mappa (che sul telefono può metterci qualche secondo).
