@@ -377,7 +377,7 @@ html, body { margin: 0; height: 100%; }
 .lb-min, .lb-close { flex: none; width: 30px; height: 30px; border: none; background: var(--line); color: var(--fg); border-radius: 50%; cursor: pointer; }
 .lb-dirs { display: flex; gap: 6px; margin: 8px 0; }
 .lb-dirs button { flex: 1; min-height: 36px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--fg); font-size: 13px; cursor: pointer; }
-.lb-dirs button.on { background: var(--fg); color: #fff; font-weight: 600; }
+.lb-dirs button.on { background: var(--fg); color: var(--bg); font-weight: 600; } /* contrasto anche in tema scuro */
 .lb-stop { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 13px; }
 .lb-stop span { color: var(--muted); }
 .lb-stop select { flex: 1; min-width: 0; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--fg); font-size: 14px; }

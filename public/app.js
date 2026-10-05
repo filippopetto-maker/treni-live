@@ -819,10 +819,13 @@ async function searchLine(q, pos) {
   lineFilter = { feed: l.feed, name: l.name, short: l.short, mode: l.mode, color, live: l.mode === 'metro' ? 0 : l.live, long: l.long, dirKey: null };
   // Tabellone della linea: arrivi alla fermata più vicina a te (o al centro della mappa).
   openBoard({ feed: l.feed, q, name: l.name, mode: l.mode, color }, at);
-  map.getSource('line-hl')?.setData({
+  const hl = {
     type: 'FeatureCollection',
     features: l.dirs.map((d) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: d.coords }, properties: { color, headsign: d.headsign } })),
-  });
+  };
+  // Ricerca fatta prima che la mappa finisca di caricare: il tracciato si disegna appena è pronta.
+  if (map.getSource('line-hl')) map.getSource('line-hl').setData(hl);
+  else map.once('load', () => lineFilter?.name === l.name && map.getSource('line-hl')?.setData(hl));
   const b = new maplibregl.LngLatBounds();
   l.dirs.forEach((d) => d.coords.forEach((p) => b.extend(p)));
   if (mobile) {
