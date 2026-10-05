@@ -716,15 +716,108 @@ function clearLine() {
   pollTransit();
 }
 
-async function searchLine(q) {
+// ---------- linee vicino a te (posizione) ----------
+// Se la posizione è concessa e sei a Roma o Milano, la ricerca linee funziona anche senza zoom
+// e la casella mostra le linee delle fermate vicine. Senza posizione resta la regola dello zoom.
+const near = { pos: null, city: null, lines: [], t: 0, asked: false, busy: null };
+
+async function geoGranted() {
+  try {
+    return (await navigator.permissions.query({ name: 'geolocation' })).state;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function refreshNear(ask = false) {
+  // Se è in corso il controllo silenzioso dell'avvio e ora tocchi la casella, si riprova chiedendo il permesso.
+  if (near.busy) return ask && !near.asked ? near.busy.then(() => refreshNear(true)) : near.busy;
+  if (near.pos && Date.now() - near.t < 60_000) return Promise.resolve(near);
+  near.busy = (async () => {
+    if (!navigator.geolocation) return near;
+    const st = await geoGranted();
+    if (st === 'denied') return near;
+    // Il permesso si chiede una volta sola, e solo quando tocchi la casella di ricerca.
+    if (st !== 'granted' && !(ask && !near.asked)) return near;
+    near.asked = true;
+    const p = await new Promise((res) =>
+      navigator.geolocation.getCurrentPosition(
+        (x) => res({ lat: x.coords.latitude, lon: x.coords.longitude }),
+        () => res(null),
+        { maximumAge: 60_000, timeout: 8000 }
+      )
+    );
+    if (!p) return near;
+    near.pos = p;
+    try {
+      const r = await fetch(`/api/lines/near?lat=${p.lat.toFixed(5)}&lon=${p.lon.toFixed(5)}`);
+      if (r.ok) {
+        Object.assign(near, await r.json());
+        near.t = Date.now(); // solo una risposta buona vale per un minuto; se fallisce si riprova al tocco dopo
+      }
+    } catch {}
+    updateSearchHint();
+    return near;
+  })().finally(() => (near.busy = null));
+  return near.busy;
+}
+
+function renderNear() {
+  const list = $('#qSugg');
+  if ($('#q').value.trim() || !near.city || !near.lines.length || document.activeElement !== $('#q')) return;
+  const now = Date.now() + clockOffset;
+  const icon = { bus: '🚌', tram: '🚋', metro: 'Ⓜ️', filobus: '🚎' };
+  list.innerHTML =
+    `<li class="near-head">Linee vicino a te</li>` +
+    near.lines
+      .map((L, i) => {
+        const min = Math.max(0, Math.round((L.next - now) / 60000));
+        return `<li data-i="${i}" class="near-line"><span class="near-chip" style="background:${esc(L.color || '#e08a00')}">${icon[L.mode] || ''} ${esc(L.name)}</span><span><b>${esc(L.heads.slice(0, 2).join(' · '))}</b><small>${esc(L.stop.name)} · ${L.dist} m · ${min >= 60 ? `alle ${new Date(L.next).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' })}` : min ? `tra ${min}′` : 'ora'}</small></span></li>`;
+      })
+      .join('');
+  list.querySelectorAll('li.near-line').forEach((li) =>
+    li.addEventListener('mousedown', async (e) => {
+      e.preventDefault();
+      const L = near.lines[+li.dataset.i];
+      list.innerHTML = '';
+      $('#q').value = L.name;
+      try {
+        if (!(await searchLine(L.q, near.pos))) $('#hint').textContent = `Linea ${L.name} non trovata.`;
+      } catch {}
+    })
+  );
+}
+
+$('#q').addEventListener('focus', () => {
+  renderNear();
+  refreshNear(true).then(renderNear);
+});
+// All'avvio, se la posizione è già concessa, si prepara la lista senza chiedere niente.
+refreshNear(false);
+
+async function searchLine(q, pos) {
+  // Dove cercare la linea: il punto dato (es. la tua posizione), poi il centro della mappa se sei
+  // zoomato su una città, poi la tua posizione se sei a Roma o Milano.
   const c = map.getCenter();
-  const r = await fetch(`/api/line?q=${encodeURIComponent(q)}&lat=${c.lat.toFixed(4)}&lon=${c.lng.toFixed(4)}`);
-  if (!r.ok) return false;
-  const l = await r.json();
+  const tries = [];
+  if (pos) tries.push(pos);
+  if (map.getZoom() >= 10) tries.push({ lat: c.lat, lon: c.lng });
+  if (near.city && near.pos) tries.push(near.pos);
+  let l = null;
+  let at = null;
+  for (const p of tries) {
+    const r = await fetch(`/api/line?q=${encodeURIComponent(q)}&lat=${p.lat.toFixed(4)}&lon=${p.lon.toFixed(4)}`);
+    if (r.ok) {
+      l = await r.json();
+      at = p;
+      break;
+    }
+  }
+  if (!l) return false;
   const color = l.mode === 'metro' && LINE_COLORS[l.name] ? LINE_COLORS[l.name] : l.color || COLORS[l.mode] || COLORS.bus;
   lineFilter = { feed: l.feed, name: l.name, short: l.short, mode: l.mode, color, live: l.mode === 'metro' ? 0 : l.live, long: l.long, dirKey: null };
   // Tabellone della linea: arrivi alla fermata più vicina a te (o al centro della mappa).
-  openBoard({ feed: l.feed, q, name: l.name, mode: l.mode, color }, { lat: c.lat, lon: c.lng });
+  openBoard({ feed: l.feed, q, name: l.name, mode: l.mode, color }, at);
   map.getSource('line-hl')?.setData({
     type: 'FeatureCollection',
     features: l.dirs.map((d) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: d.coords }, properties: { color, headsign: d.headsign } })),
@@ -770,6 +863,7 @@ $('#q').addEventListener('input', () => {
   clearTimeout(qTimer);
   const q = $('#q').value.trim();
   const list = $('#qSugg');
+  if (!q) return renderNear();
   if (q.length < 3 || /^\d/.test(q)) return (list.innerHTML = '');
   qTimer = setTimeout(async () => {
     const res = await findStations(q).catch(() => []);
@@ -789,7 +883,8 @@ $('#q').addEventListener('blur', () => setTimeout(() => ($('#qSugg').innerHTML =
 
 // Il suggerimento nella casella cambia quando si è dentro una città.
 function updateSearchHint() {
-  $('#q').placeholder = map.getZoom() >= 10 ? 'Cerca treno, linea o stazione (es. 64, Termini)' : 'Cerca treno o stazione (es. 9651, Bologna)';
+  $('#q').placeholder =
+    map.getZoom() >= 10 || near.city ? 'Cerca treno, linea o stazione (es. 64, Termini)' : 'Cerca treno o stazione (es. 9651, Bologna)';
 }
 map.on('zoomend', updateSearchHint);
 $('#q').addEventListener('input', () => !$('#q').value && lineFilter && clearLine());
@@ -799,7 +894,7 @@ $('#search').addEventListener('submit', async (e) => {
   const q = $('#q').value.trim().toUpperCase().replace(/\s+/g, ' ');
   if (!q) return;
   // Zoomati su una città: prima si cerca una linea urbana, poi un treno.
-  if (map.getZoom() >= 10 && q.length <= 12) {
+  if ((map.getZoom() >= 10 || near.city) && q.length <= 12) {
     try {
       if (await searchLine(q)) return;
     } catch {}

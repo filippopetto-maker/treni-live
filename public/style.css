@@ -408,3 +408,27 @@ html, body { margin: 0; height: 100%; }
 #navMsg:not(:empty) { line-height: 1.4; }
 
 .g-stopall { width: 100%; padding: 10px; border: 1px solid var(--bad); border-radius: 9px; background: transparent; color: var(--bad); font-size: 14px; font-weight: 700; cursor: pointer; }
+
+/* Linee vicino a te (suggerimenti della ricerca) */
+#qSugg .near-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #8a909c; cursor: default; padding: 6px 10px 2px; }
+#qSugg .near-line { display: flex; gap: 8px; align-items: center; }
+#qSugg .near-chip { min-width: 58px; padding: 3px 8px; color: #fff; font-weight: 700; font-size: 14px; text-align: center; border-radius: 7px; white-space: nowrap; flex: none; }
+#qSugg .near-line > span:last-child { min-width: 0; flex: 1; }
+#qSugg .near-line b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Guida a bordo: prossime fermate */
+#gStops { margin: 8px 0 0; padding: 0 0 0 4px; font-size: 13px; list-style: none; }
+#gStops.hidden { display: none; }
+#gStops li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0 3px 18px; position: relative; opacity: .8; }
+#gStops li::before { content: ""; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,.25); }
+#gStops li::after { content: ""; position: absolute; left: 1px; top: 50%; width: 10px; height: 10px; box-sizing: border-box; border: 2px solid rgba(255,255,255,.5); border-radius: 50%; background: #1d2330; transform: translateY(-50%); }
+#gStops li.next { opacity: 1; font-weight: 700; }
+#gStops li.next::after { background: #4fc3f7; border-color: #4fc3f7; animation: gpulse 1.6s infinite; }
+#gStops li.dest { opacity: 1; font-weight: 700; color: #f0a202; }
+#gStops li.dest::after { background: #f0a202; border-color: #f0a202; border-radius: 3px; }
+#gStops li.gap { font-style: italic; opacity: .6; }
+#gStops li.gap::after { display: none; }
+#gStops .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#gStops .t { font-variant-numeric: tabular-nums; flex: none; }
+@keyframes gpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,195,247,.5); } 50% { box-shadow: 0 0 0 6px rgba(79,195,247,0); } }
+@media (prefers-reduced-motion: reduce) { #gStops li.next::after { animation: none; } }

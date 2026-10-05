@@ -265,6 +265,16 @@ const server = http.createServer(async (req, res) => {
       const city = Number(url.searchParams.get('zoom')) >= 10;
       return send(req, res, 200, await planner.findStations(q, near, city));
     }
+    if (url.pathname === '/api/lines/near') {
+      const lat = Number(url.searchParams.get('lat'));
+      const lon = Number(url.searchParams.get('lon'));
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return send(req, res, 400, { error: 'posizione mancante' });
+      try {
+        return send(req, res, 200, (await planner.linesNear(lat, lon)) || { city: null, lines: [] });
+      } catch (e) {
+        return send(req, res, 503, { error: e.message });
+      }
+    }
     if (url.pathname === '/api/line/board') {
       // Tabellone della linea: arrivi alla fermata scelta in una direzione, con GPS e corse a rischio.
       activity.touch();

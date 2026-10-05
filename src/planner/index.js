@@ -707,6 +707,52 @@ export class Planner {
 
   /** Prossime partenze da una fermata ("roma:123" o "rail:S01700"), ritardi compresi. */
   /**
+   * Linee che passano vicino a un punto (fermate entro `radius` metri), con la fermata più vicina,
+   * le destinazioni e il prossimo passaggio. null se il punto non è in una città col navigatore.
+   */
+  async linesNear(lat, lon, radius = 450) {
+    const feed = this.cityFeeds.find((f) => inBbox(f.bbox, lat, lon));
+    if (!feed) return null;
+    const net = await this.readyNet(feed.id);
+    if (!net) return null;
+    const now = Date.now();
+    const lt = localTime(now);
+    const d = net.day(lt.ymd);
+    const lines = new Map();
+    for (const [i, m] of net.near(lat, lon, radius)) {
+      for (let e = d.spOff[i]; e < d.spOff[i + 1]; e++) {
+        const P = d.patterns[d.spP[e]];
+        const pos = d.spPos[e];
+        if (pos === P.n - 1) continue; // capolinea d'arrivo: da qui non si parte
+        const info = net.tripInfo(P.trips[0]);
+        const li = lineInfo(net.id, info);
+        const key = `${info.mode}|${li.line}`;
+        let next = null;
+        for (let j = 0; j < P.trips.length; j++) {
+          const t = P.dep[j * P.n + pos];
+          if (t >= lt.sec - 60 && (next == null || t < next)) next = t;
+        }
+        let L = lines.get(key);
+        if (!L) {
+          L = { q: info.mode === 'metro' ? li.line : `${info.mode} ${li.line}`, name: li.line, mode: info.mode, color: li.color, dist: m, stop: { id: i, name: net.stops[i].name }, heads: new Set(), next: null };
+          lines.set(key, L);
+        }
+        if (m < L.dist) Object.assign(L, { dist: m, stop: { id: i, name: net.stops[i].name } });
+        if (info.headsign) L.heads.add(info.headsign);
+        if (next != null && (L.next == null || next < L.next)) L.next = next;
+      }
+    }
+    return {
+      city: feed.id,
+      lines: [...lines.values()]
+        .filter((L) => L.next != null)
+        .sort((a, b) => Math.round(a.dist / 100) - Math.round(b.dist / 100) || a.next - b.next)
+        .slice(0, 18)
+        .map((L) => ({ ...L, dist: Math.round(L.dist), heads: [...L.heads].slice(0, 3), next: lt.midnight + L.next * 1000 })),
+    };
+  }
+
+  /**
    * Tabellone di una linea bus/tram/metro in una direzione: per ogni corsa che deve ancora passare
    * dalla fermata scelta (o la più vicina al punto dato), tra quanto arriva, se il mezzo trasmette
    * la posizione GPS, quante fermate mancano, e se è una corsa "fantasma" (doveva essere partita

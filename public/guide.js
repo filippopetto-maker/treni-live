@@ -351,6 +351,7 @@ function render() {
   let title = '';
   let sub = '';
   let warn = '';
+  let stops = null; // a bordo: striscia con le prossime fermate
 
   if (leg.type === 'walk') {
     const next = legs[G.i + 1];
@@ -404,8 +405,22 @@ function render() {
       }
       const pr = GC.progress(leg, off, t, userS);
       const viaGps = userS != null;
-      title = pr.remaining > 1 ? `A bordo: scendi a ${leg.to.name}` : pr.remaining === 1 ? `Scendi alla prossima: ${leg.to.name}` : `Scendi ora: ${leg.to.name}`;
-      sub = `${pr.remaining > 0 ? `${pr.remaining} ${pr.remaining === 1 ? 'fermata' : 'fermate'} · prossima ${pr.next.name} · ` : ''}arrivo ${GC.hhmm(pr.arr)}${viaGps ? '' : ' · stima a orario'}`;
+      // In diretta: la prossima fermata intermedia (distanza lungo la linea col GPS, minuti a orario senza).
+      const nk = Math.min(pr.passed + 1, leg.stops.length - 1);
+      const toNext = viaGps ? Math.max(0, p.stopS[nk] - userS) : null;
+      const nextMin = Math.round((leg.stops[nk].t + off - t) / 60_000);
+      const howFar = toNext != null ? (toNext < 1000 ? `${Math.round(toNext / 10) * 10} m` : `${(toNext / 1000).toFixed(1)} km`) : nextMin > 0 ? `tra ${nextMin} min` : 'ora';
+      if (pr.remaining > 1) {
+        title = toNext != null && toNext < 150 ? `In arrivo a ${pr.next.name}` : `Prossima fermata: ${pr.next.name}`;
+        sub = `${howFar} · scendi a ${leg.to.name} tra ${pr.remaining} fermate · arrivo ${GC.hhmm(pr.arr)}${viaGps ? ' · GPS' : ' · stima a orario'}`;
+      } else if (pr.remaining === 1) {
+        title = `Scendi alla prossima: ${leg.to.name}`;
+        sub = `${howFar} · arrivo ${GC.hhmm(pr.arr)}${viaGps ? ' · GPS' : ' · stima a orario'}`;
+      } else {
+        title = `Scendi ora: ${leg.to.name}`;
+        sub = `arrivo ${GC.hhmm(pr.arr)}`;
+      }
+      stops = { leg, pr, off };
       const dDest = here ? GC.dist(here, [leg.to.lon, leg.to.lat]) : null;
       if (pr.remaining <= 1 && leg.stops.length >= 2 && (pr.remaining === 1 || pr.passed > 0)) announce(`${i}:prossima`, GC.message('prossima', leg, pr, legs[i + 1], t));
       const atDest = viaGps ? pr.remaining === 0 || (dDest != null && dDest < 150 && pr.remaining <= 1) : t >= pr.arr - 30_000;
@@ -427,11 +442,41 @@ function render() {
   $('#gIco').textContent = ico;
   $('#gTitle').textContent = title;
   $('#gSub').textContent = sub;
+  renderStops(stops, t);
   $('#gWarn').textContent = warn || (G.posDenied ? 'Posizione non permessa: guida solo a orario' : '');
   $('#gVoice').classList.toggle('hidden', G.voice || !can.voice || !prefs.guide);
   $('#gBoard').classList.toggle('hidden', !(leg.type === 'ride' && !G.aboard[G.i]) && !(leg.type === 'walk' && legs[G.i + 1]?.type === 'ride'));
   $('#gFollow').classList.toggle('hidden', G.follow || !G.pos);
   $('#gPush').textContent = G.pushId ? '🔔' : '';
+}
+
+/** Striscia "a bordo": le prossime 3 fermate intermedie e quella dove scendere, con l'orario stimato. */
+function renderStops(s, t) {
+  const el = $('#gStops');
+  if (!s) {
+    if (!el.classList.contains('hidden')) {
+      el.classList.add('hidden');
+      el.innerHTML = '';
+    }
+    return;
+  }
+  const st = s.leg.stops;
+  const last = st.length - 1;
+  const from = Math.min(s.pr.passed + 1, last);
+  const ks = [];
+  for (let k = from; k < last && ks.length < 3; k++) ks.push(k);
+  const skipped = last - from - ks.length; // fermate non mostrate prima di quella dove scendere
+  ks.push(last);
+  const html = ks
+    .map((k, j) => {
+      const cls = [k === from ? 'next' : '', k === last ? 'dest' : ''].filter(Boolean).join(' ');
+      const gap = k === last && skipped > 0 ? `<li class="gap">… ${skipped} ${skipped === 1 ? 'fermata' : 'fermate'}</li>` : '';
+      const name = String(st[k].name).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+      return `${gap}<li class="${cls}"><span class="n">${name}</span><span class="t">${GC.hhmm(st[k].t + s.off)}</span></li>`;
+    })
+    .join('');
+  if (el.innerHTML !== html) el.innerHTML = html;
+  el.classList.remove('hidden');
 }
 
 /** Salita a bordo: dopo l'orario di passaggio ti muovi lungo la linea, lontano dalla fermata. */
